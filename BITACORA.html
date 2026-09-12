@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bitácora — Tero</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --fondo: #fafaf9;
+    --texto: #1c1917;
+    --texto-tenue: #6b6863;
+    --borde: #e5e2dd;
+    --acento: #7c5cff;
+    --chip-fondo: #f1effb;
+    --chip-texto: #5a3fd6;
+    --ok: #2f8f5b;
+    --code-fondo: #f0eee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #17161a;
+      --texto: #ece9e6;
+      --texto-tenue: #9b978f;
+      --borde: #2c2a30;
+      --acento: #a58bff;
+      --chip-fondo: #2a2440;
+      --chip-texto: #c7b8ff;
+      --ok: #6fd19a;
+      --code-fondo: #221f26;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--fondo);
+    color: var(--texto);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    margin: 0;
+    padding: 2rem 1rem 4rem;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  header h1 {
+    font-size: 1.5rem;
+    margin: 0 0 0.25rem;
+  }
+  header p {
+    color: var(--texto-tenue);
+    margin: 0 0 2.5rem;
+    font-size: 0.9rem;
+  }
+  .dia {
+    margin-bottom: 2.5rem;
+    padding-left: 1.25rem;
+    border-left: 2px solid var(--borde);
+  }
+  .dia h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--acento);
+    margin: 0 0 0.9rem;
+    letter-spacing: 0.01em;
+  }
+  .entrada {
+    margin-bottom: 0.9rem;
+    padding-bottom: 0.9rem;
+  }
+  .entrada:not(:last-child) {
+    border-bottom: 1px solid var(--borde);
+  }
+  .entrada p {
+    margin: 0.3rem 0 0;
+  }
+  .tags {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.35rem;
+  }
+  .tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: var(--chip-fondo);
+    color: var(--chip-texto);
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+  }
+  .tag.fix { --chip-fondo: #3a2222; }
+  code {
+    background: var(--code-fondo);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+  ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+  li { margin: 0.15rem 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Bitácora — Tero</h1>
+    <p>Registro cronológico de lo que se va haciendo, sesión por sesión. Se agrega a medida que se trabaja, no al final. Ver <code>CLAUDE.md</code> para el estado general del proyecto y <code>INSTALACIONES.md</code> para lo instalado a nivel sistema.</p>
+  </header>
+
+  <section class="dia">
+    <h2>2026-09-12</h2>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">commit</span></div>
+      <p>Fase 1 (esqueleto) commiteada: tecla, grabación, STT, TTS. <code>630b3a4</code>.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">commit</span></div>
+      <p>Fase 2 (cerebro) commiteada: Ollama + Qwen3 4B instruct con tool calling, primeras herramientas (<code>consultar_clima</code>, <code>ajustar_volumen</code>, <code>abrir_url</code>). <code>5eef997</code>.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Catálogo de herramientas de fase 2 cerrado:</p>
+      <ul>
+        <li><code>reproducir_musica</code> / <code>control_media</code> (<code>herramientas/musica.py</code>) — búsqueda web de Spotify + playerctl/MPRIS.</li>
+        <li><code>buscar_en_sitio</code> sumado a <code>herramientas/web.py</code> (mercadolibre, google, youtube, amazon).</li>
+        <li><code>leer_terminal</code> (<code>herramientas/terminal.py</code>) — tmux si hay sesión, si no portapapeles.</li>
+        <li><code>consultar_hora</code> (<code>herramientas/tiempo.py</code>) — no estaba en el plan original, se agregó porque el modelo no tiene noción de reloj.</li>
+      </ul>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">config</span></div>
+      <p>Tecla de activación cambiada de <code>KEY_PAUSE</code> a <code>KEY_RIGHTCTRL</code> (Control derecho).</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p>Prueba en vivo con las tools nuevas: el modelo alucinaba fallas ("no encontré nada en Spotify") sin que la herramienta reportara error. Fix en <code>cerebro/prompt.py</code>: regla explícita de no inventar fallos, más reescritura del string de retorno de <code>reproducir_musica</code> para que sea inequívoco.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p>El modelo preguntaba de más ante pedidos ambiguos en vez de actuar (ej. "poné música" sin especificar). Fix en el prompt: evitar preguntas de aclaración salvo que no haya ninguna acción posible, y regla puntual para que un pedido genérico de música dispare <code>control_media(reproducir)</code> en vez de preguntar qué escuchar.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">decisión</span></div>
+      <p><code>control_media</code> necesita <code>playerctl</code> (no instalado en esta máquina). Se evaluó reemplazarlo por un controlador MPRIS propio (<code>dbus-next</code>) y se descartó: no elimina la dependencia real, el reproductor tiene que hablar MPRIS de todas formas. Detalle en <code>INSTALACIONES.md</code>.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">infra</span></div>
+      <p>Se creó <code>INSTALACIONES.md</code> para registrar todo lo instalado a nivel sistema (fuera del venv), con cómo revertirlo — para no quedar con instalaciones huérfanas si el proyecto se descarta.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">infra</span></div>
+      <p><code>playerctl</code> instalado (<code>sudo apt install playerctl</code>, v2.4.1). Con Spotify abierto, <code>control_media</code> funciona de verdad.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Se creó <code>BITACORA.html</code> (este archivo) a pedido del usuario: registro de pasos en HTML, no markdown, para verlo directo en el navegador.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p><code>reproducir_musica</code> y <code>control_media</code> pasan a quedar en silencio cuando funcionan (la música que suena es la respuesta) — solo hablan si la herramienta reportó un error real. Cambio en <code>cerebro/router.py</code> (<code>_HERRAMIENTAS_SILENCIOSAS</code>) y <code>main.py</code> (no llama al TTS si la respuesta viene vacía).</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>Detectado: <code>reproducir_musica</code> abría la búsqueda en Spotify pero no reproducía nada (el URI <code>spotify:search:</code> solo muestra resultados, no elige ni arranca una canción). Encadenar con <code>control_media</code> tampoco serviría: play/pausa de MPRIS actúa sobre lo que ya está cargado, no sabe nada de la búsqueda.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Reescrito <code>reproducir_musica</code> para usar la <strong>Web API de Spotify</strong> de verdad: busca el track exacto (<code>/v1/search</code>) y lo manda a reproducir (<code>/v1/me/player/play</code>) en el dispositivo activo, abriendo la app primero si hace falta. Requiere Spotify Premium (el endpoint de reproducción da 403 en cuentas free).</p>
+      <ul>
+        <li>App "Tero" registrada en el Spotify Developer Dashboard, Web API únicamente.</li>
+        <li>Login OAuth con PKCE (sin client secret, pensado para apps de escritorio) en <code>herramientas/_spotify_auth.py</code> — corrido una vez a mano (<code>uv run python -m herramientas._spotify_auth</code>).</li>
+        <li>Refresh token guardado en <code>~/.config/tero/spotify_token.json</code> (permisos 600, fuera del repo).</li>
+        <li>Client ID (no es secreto) en <code>config.toml</code>, sección <code>[spotify]</code>.</li>
+      </ul>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Memoria de los últimos 2 intercambios en <code>Cerebro</code> (<code>cerebro/router.py</code>): sin esto cada frase arrancaba de cero — "poné metallica" y después "pausalo" no tenían forma de conectarse. Confirmado con clima: preguntar por Trelew, después Toay, después solo "Trelew" (sin repetir "hace calor en") siguió funcionando por el contexto de los turnos previos.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p>Regla de "no preguntar" endurecida: no es solo estilo, es que <strong>no hay memoria entre turnos</strong> (antes del punto anterior) — si el modelo pregunta algo y el usuario responde "sí", esa respuesta llega sin ningún rastro de la pregunta. Prohibido pedir confirmación o hacer preguntas de seguimiento; ante ambigüedad, actuar con la interpretación más razonable.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>El STT (Whisper) seguía fallando feo con nombres propios reales (Charly García, Jamiroquai, y sobre todo <strong>Trelew</strong> — ciudad natal del usuario — y <strong>Toay</strong>, donde vive ahora). Intentos en orden:</p>
+      <ul>
+        <li>Subir de "small" a "medium": mejora notable en general.</li>
+        <li><code>initial_prompt</code> en <code>voz/stt.py</code> con pistas de nombres (ciudades del usuario, artistas ya probados): ayudó puntualmente pero es un parche por nombre, no escala.</li>
+        <li><strong>Solución real: subir a "large-v3"</strong>. El usuario fue explícito: prefiere más lento pero que entienda, esto no es un problema de una ciudad puntual sino algo que iba a repetirse constantemente. Con GPU, la latencia se mantuvo razonable (~0.3s en caliente).</li>
+      </ul>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">infra</span></div>
+      <p>Borrados los modelos Whisper "small" y "medium" del caché de HuggingFace (~2 GB liberados) — solo queda "large-v3" descargado.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">decisión</span></div>
+      <p>Se evaluó una voz tipo "robot de asistente" (espeak-ng, síntesis clásica por formantes, o un efecto encima de Piper) y se descartó: probado un demo online de espeak-ng, no se entendía bien, y el usuario no quiere gastar recursos extra en efectos de audio. Se sigue con Piper (<code>es_AR-daniela-high</code>), que es lo que ya funciona.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>Fase 5 (la boca), arrancada.</strong> Overlay con <code>pywebview</code> (backend Qt, GTK no se pudo por falta de PyGObject) + WebSocket (<code>boca/server.py</code>) + canvas con <a href="https://github.com/kopiro/siriwave">siriwave</a> (vendorizado local, no CDN) en vez del círculo pulsante original — mucho más prolijo. Estados: idle/escuchando/pensando/hablando/música, con suavizado asimétrico (ataque rápido, decaimiento lento) para que no tiemble con el RMS crudo.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>Saga de "siempre encima": en Wayland nativo (confirmado con <code>wmctrl -l</code>/<code>xwininfo</code> sin ver ninguna ventana real), ni el flag <code>on_top</code> de Qt ni <code>wmctrl -b add,above</code> tenían efecto. Solución: forzar <code>QT_QPA_PLATFORM=xcb</code> (XWayland) para que la ventana sea una ventana X11 real — instaladas <code>libxcb-cursor0</code>, <code>libxcb-icccm4</code>, <code>libxcb-keysyms1</code> para que el plugin xcb de Qt cargue. Con eso, <code>wmctrl</code> sí ve la ventana y <code>-b add,above</code> funciona. Igual no es 100% persistente (Mutter lo puede soltar), así que la ventana se reafirma al frente cada 400ms mientras dura el habla, en vez de una sola vez.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>La boca ahora reacciona al <strong>audio real del sistema</strong> (<code>boca/audio_sistema.py</code>), no solo a la voz de Tero: detecta el sink default vía <code>wpctl inspect</code>, abre su <code>.monitor</code> con <code>sounddevice</code>, y manda niveles RMS reales mientras Tero está en reposo (estado "musica", color distinto). Si Tero pasa a escuchar/pensar/hablar, eso tiene prioridad y el audio de fondo se ignora hasta volver a estar idle.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Nombre de la canción actual + barra de progreso con tiempo (interpolado entre polls de 5s a la Web API de Spotify, para que no salte). Se probó fusionar la barra como fondo de la propia onda con el tiempo superpuesto — quedó feo (bloque sólido con el filtro de sombra) y se revirtió al diseño con barra fina separada debajo del nombre, que sí funcionó bien.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Bot de Telegram propio (<code>@BotFather</code>, gratis) para <code>mandar_al_celular</code>: manda texto/links al Samsung del usuario. Token + chat_id en <code>~/.config/tero/telegram.json</code> (permisos 600, fuera del repo). Se evaluaron GSConnect y Google Chat antes de esto; Telegram ganó por ser lo más simple de armar (sin OAuth, sin extensión de sistema) y porque el usuario ya lo tenía instalado.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p>Tool calling pasó de una ronda fija a un <strong>loop de hasta 4 rondas</strong> (<code>cerebro/router.py</code>) para que pedidos compuestos ("buscá X y mandámelo al celular") puedan resolverse con más de una herramienta por turno, en vez de que el modelo invente que ya hizo la segunda acción. Ayuda, pero el modelo de 4B sigue sin encadenarlas de forma confiable siempre — límite real del modelo, no de la arquitectura.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>La "nota interna" que reemplaza el texto hablado en el historial (para que el modelo no copie respuestas viejas) se filtró igual dos veces: primero como rol "assistant" (se resolvió pasándola a rol "system"), después el formato tipo función (<code>tool({"arg": "val"}) -&gt; resultado</code>) se le pegó como estilo y el modelo terminó <em>diciendo en voz alta</em> esa sintaxis literal. Fix final: la nota va en prosa simple, sin paréntesis ni llaves, nada que parezca código para copiar.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p>Respuestas de éxito acortadas a una palabra ("listo", "ok", "perfecto", "hecho") en vez de recitar qué se hizo — el usuario lo pidió explícitamente ("respuestas largas son muy molestas"). "Ya está" quedó afuera de los ejemplos: en argentino suena cortante/descortés.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p><code>buscar_en_sitio</code>/<code>calcular_viaje</code> no devolvían la URL real en el resultado — por eso, cuando se pedía "mandalo al celular", el modelo inventaba una dirección de memoria en vez de copiar el link real. Fix: el resultado de la herramienta ahora incluye la URL de verdad.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p>Si el micrófono está apagado/muteado, Whisper alucinaba "gracias" en vez de devolver texto vacío (patrón conocido del modelo con silencio real). Fix de raíz: si el audio grabado tiene RMS casi cero, ni se manda a transcribir — se avisa directo que el micrófono parece apagado.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Nueva herramienta <code>calcular_viaje</code> (<code>herramientas/mapas.py</code>): geocodifica con la misma API de Open-Meteo que usa <code>clima.py</code>, calcula distancia/tiempo real con el servidor demo de <a href="https://project-osrm.org/">OSRM</a> (gratis, sin clave), y abre la ruta en Google Maps.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,318 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="siriwave.umd.js"></script>
+<style>
+  html, body {
+    margin: 0;
+    background: transparent;
+    overflow: hidden;
+    {# background: #000000; #}
+  }
+
+  #boca-wrapper {
+    position: relative;
+    width: 260px;
+        height: 69px;
+  }
+
+  #onda-wrapper {
+    position:relative;
+  }
+
+  #onda {
+    width: 260px;
+    height: 50px;
+    position: relative;
+    z-index: 1;
+  }
+  #info {
+    position: absolute;
+    left: 0;
+    bottom: 32px;
+    right: 0;
+    height: 12px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  #info.visible {
+    opacity: 0.7;
+  }
+  #cancion {
+    color: rgba(255, 255, 255, 0.8);
+    font: 11px -apple-system, "Segoe UI", sans-serif;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 0 6px rgba(0,0,0,0.6);
+    margin-bottom: 3px;
+  }
+  #fila-progreso {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    top: 22px;
+    z-index: 0;
+  }
+  #fila-progreso span {
+    color: rgba(255, 255, 255, 0.55);
+    font: 9px -apple-system, "Segoe UI", sans-serif;
+    text-shadow: 0 0 4px rgba(0,0,0,0.6);
+    min-width: 26px;
+  }
+  #tiempo-actual { text-align: right; margin-top: -12px; }
+  #tiempo-total { text-align: left; margin-top: -12px;}
+  /* Barra de luz: adaptada de un diseño que pasó el usuario (gradiente
+     animado + brillo "respirando" + puntas achaflanadas). El chaflán
+     original era de 16px para una barra de 520px -- acá se achica a 3px
+     (mismo alto que la barra) para que no se vea como un rombo en algo
+     tan chico. */
+  @property --glow {
+    syntax: "<color>";
+    inherits: false;
+    initial-value: #168fe9;
+  }
+  #barra {
+    flex: 1;
+    height: 2px;
+    position: relative;
+    background: transparent;
+    overflow: visible;
+  }
+  #barra::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0);
+    clip-path: polygon(0 50%, 3px 0, calc(100% - 3px) 0, 100% 50%, calc(100% - 3px) 100%, 3px 100%);
+  }
+  #barra-relleno {
+    height: 100%;
+    width: 0%;
+    position: relative;
+    {# clip-path: polygon(0 50%, 3px 0, calc(100% - 3px) 0, 100% 50%, calc(100% - 3px) 100%, 3px 100%); #}
+    background: linear-gradient(90deg,
+      #168fe9 0%, #20dba5 17%, #f33f64 34%, #ffffff 42%,
+      #26e993 50%, #2668db 67%, #168fe9 84%, #20dba5 100%
+    );
+    background-size: 300% 100%;
+    filter: drop-shadow(0 0 3px var(--glow)) drop-shadow(0 0 8px var(--glow));
+    background: #fff;
+    border-radius: 100%;
+    opacity: 1;
+    animation:
+      barra-color-flow 4s linear infinite,
+      barra-glow-color 4s linear infinite,
+      barra-respira 1.8s ease-in-out infinite;
+  }
+  /* Puntito de luz en la punta del progreso, un poco más fuerte que el
+     resto de la barra pero sin llamar demasiado la atención. */
+  #barra-relleno::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    transform: translateY(-50%);
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 3px 1px rgba(255, 255, 255, 0.85), 0 0 7px 2px var(--glow);
+  }
+  @keyframes barra-respira {
+    50% {
+      filter: brightness(1.25) drop-shadow(0 0 4px var(--glow)) drop-shadow(0 0 11px var(--glow));
+    }
+  }
+  @keyframes barra-color-flow {
+    to { background-position: -300% 0; }
+  }
+  @keyframes barra-glow-color {
+    0%, 100% { --glow: #168fe9; }
+    25% { --glow: #20dba5; }
+    42% { --glow: #f33f64; }
+    52% { --glow: #ffffff; }
+    68% { --glow: #26e993; }
+    84% { --glow: #2668db; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #barra-relleno { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div id="boca-wrapper">
+
+    <div id="onda-wrapper">
+      <div id="onda"></div>
+      <div id="fila-progreso">
+        <span id="tiempo-actual">0:00</span>
+        <div id="barra"><div id="barra-relleno"></div></div>
+        <span id="tiempo-total">0:00</span>
+      </div>
+    </div>
+    <div id="info">
+      <div id="cancion"></div>
+    </div>
+  </div>
+<script>
+// Es render, no IA: RMS -> amplitud de la onda, con suavizado asimétrico
+// propio (ataque rápido, decaimiento lento) antes de pasárselo a SiriWave
+// (que además tiene su propio lerp interno, así que queda doblemente
+// suave). El RMS crudo tiembla -- esto es lo que separa "se ve pro" de
+// "se ve amateur".
+
+const COLORES = {
+  idle:        "#4a4458",
+  escuchando:  "#7c5cff",
+  pensando:    "#c77dff",
+  hablando:    "#7c5cff",
+  musica:      "#5cffd4",
+};
+
+const AMPLITUD_IDLE = 0.15;
+const AMPLITUD_ESCUCHANDO = 0.35;
+const AMPLITUD_PENSANDO = 0.45;
+
+const wave = new SiriWave({
+  container: document.getElementById("onda"),
+  style: "ios9",
+  color: "#7c5cff",
+  speed: 0.06,
+  amplitude: AMPLITUD_IDLE,
+  autostart: true,
+});
+
+let estado = "idle";
+let nivelCrudo = 0;
+let nivelSuave = AMPLITUD_IDLE;
+
+const ATAQUE = 0.7;       // qué tan rápido sube la amplitud al hablar
+const DECAIMIENTO = 0.25; // más rápido que antes (0.08): con eso la onda
+                          // quedaba "abierta" en los silencios entre
+                          // palabras, se veía desacoplada del audio real.
+
+function amplitudObjetivo() {
+  if (estado === "hablando" || estado === "musica") return nivelCrudo;
+  if (estado === "pensando") return AMPLITUD_PENSANDO;
+  if (estado === "escuchando") return AMPLITUD_ESCUCHANDO;
+  return AMPLITUD_IDLE;
+}
+
+function animar() {
+  const objetivo = amplitudObjetivo();
+  const tasa = objetivo > nivelSuave ? ATAQUE : DECAIMIENTO;
+  nivelSuave += (objetivo - nivelSuave) * tasa;
+  wave.setAmplitude(nivelSuave);
+  // La velocidad de la onda también sigue el nivel: antes era fija
+  // mientras hablaba, y una onda moviéndose siempre igual sin importar
+  // qué tan fuerte suena la voz es justo lo que se veía desacoplado.
+  if (estado === "hablando" || estado === "musica") {
+    wave.setSpeed(0.04 + nivelSuave * 0.18);
+  }
+  requestAnimationFrame(animar);
+}
+requestAnimationFrame(animar);
+
+// Mutter no respeta "siempre encima" de forma persistente: si el usuario
+// foca otra ventana mientras Tero habla, la boca cae atrás igual aunque
+// se haya traído al frente al empezar. Como no hay layer-shell, se
+// reintenta a repetición mientras dura el habla, no solo una vez al
+// arrancar -- molesto pero es lo que hay sin tocar el compositor.
+let intervaloFrente = null;
+
+function empezarATraerAlFrente() {
+  if (intervaloFrente !== null || !window.pywebview) return;
+  window.pywebview.api.traer_al_frente();
+  intervaloFrente = setInterval(() => {
+    window.pywebview.api.traer_al_frente();
+  }, 400);
+}
+
+function dejarDeTraerAlFrente() {
+  if (intervaloFrente !== null) {
+    clearInterval(intervaloFrente);
+    intervaloFrente = null;
+  }
+}
+
+function aplicarEstado(nuevo) {
+  const eraHablando = estado === "hablando";
+  estado = nuevo;
+  wave.setSpeed(estado === "pensando" ? 0.12 : 0.06);
+  document.getElementById("onda").style.filter =
+    `drop-shadow(0 0 12px ${COLORES[estado] || COLORES.idle})`;
+  if (estado === "hablando" && !eraHablando) {
+    empezarATraerAlFrente();
+  } else if (estado !== "hablando" && eraHablando) {
+    dejarDeTraerAlFrente();
+  }
+}
+
+// Progreso interpolado: el poll de Spotify llega cada ~5s, pero la
+// canción avanza continuamente. En vez de saltar cada 5s, se guarda el
+// progreso recibido + cuándo llegó, y cada frame se calcula dónde debería
+// estar "ahora" asumiendo que sigue sonando -- el próximo poll corrige
+// cualquier desvío (pausa, salto de tema) solo.
+let progresoBase = 0;
+let duracionMs = 0;
+let momentoRecibido = 0;
+let reproduciendoAlgo = false;
+
+function formatearTiempo(ms) {
+  const totalSeg = Math.max(0, Math.floor(ms / 1000));
+  const min = Math.floor(totalSeg / 60);
+  const seg = totalSeg % 60;
+  return `${min}:${String(seg).padStart(2, "0")}`;
+}
+
+function aplicarCancion(info) {
+  const elInfo = document.getElementById("info");
+  if (!info) {
+    reproduciendoAlgo = false;
+    elInfo.classList.remove("visible");
+    return;
+  }
+  document.getElementById("cancion").textContent = info.texto;
+  progresoBase = info.progreso_ms;
+  duracionMs = info.duracion_ms;
+  momentoRecibido = performance.now();
+  reproduciendoAlgo = true;
+  elInfo.classList.add("visible");
+}
+
+function animarProgreso() {
+  if (reproduciendoAlgo && duracionMs > 0) {
+    const transcurridoReal = performance.now() - momentoRecibido;
+    const progresoMs = Math.min(duracionMs, progresoBase + transcurridoReal);
+    document.getElementById("barra-relleno").style.width =
+      `${(progresoMs / duracionMs) * 100}%`;
+    document.getElementById("tiempo-actual").textContent = formatearTiempo(progresoMs);
+    document.getElementById("tiempo-total").textContent = formatearTiempo(duracionMs);
+  }
+  requestAnimationFrame(animarProgreso);
+}
+requestAnimationFrame(animarProgreso);
+
+function conectar() {
+  const ws = new WebSocket("ws://127.0.0.1:8765");
+  ws.onmessage = (ev) => {
+    const datos = JSON.parse(ev.data);
+    if (datos.estado !== undefined) aplicarEstado(datos.estado);
+    if (datos.nivel !== undefined) nivelCrudo = datos.nivel;
+    if (datos.cancion !== undefined) aplicarCancion(datos.cancion);
+  };
+  ws.onclose = () => setTimeout(conectar, 1000);
+  ws.onerror = () => ws.close();
+}
+conectar();
+</script>
+</body>
+</html>

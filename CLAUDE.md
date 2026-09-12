@@ -144,27 +144,37 @@ el esquema JSON que consume Ollama. Agregar una capacidad = un archivo de
 herramientas = [
   reproducir_musica, control_media, consultar_clima,
   abrir_url, buscar_en_sitio, ajustar_volumen,
-  leer_terminal, capturar_pantalla,
+  leer_terminal, consultar_hora, capturar_pantalla,
   delegar_a_codex          # salida de escape
 ]
 ```
+
+Catálogo completo ✅ salvo `capturar_pantalla` (fase 3, atado a
+`Plataforma.capturar_pantalla`) y `delegar_a_codex` (fase 4).
+`consultar_hora` no estaba en el plan original: se agregó porque el modelo
+local no tiene noción de reloj y "qué hora es"/"qué día es hoy" lo
+necesitan.
 
 Notas por herramienta:
 
 - **Clima**: Open-Meteo. Sin clave, sin registro. Leer forecast horario y
   dejar que el modelo lo resuma en lenguaje natural.
-- **Media**: teclas multimedia para play/pausa/siguiente (funciona igual en
-  ambos sistemas). Para "poné el disco negro de Metallica", el modelo
-  resuelve el nombre del álbum y se abre un URI de búsqueda de Spotify.
-  Versión posterior: Web API de Spotify (gratis, OAuth una sola vez).
+- **Media**: `reproducir_musica` abre la búsqueda en
+  `open.spotify.com/search/` (no el URI `spotify:search:`: la URL web
+  funciona con o sin la app instalada). `control_media` usa `playerctl`
+  (MPRIS) para play/pausa/siguiente/anterior — requiere tenerlo instalado,
+  no viene por defecto.
 - **Web / MercadoLibre**: **no** hacer un agente con navegador. El modelo
   arma la URL y se abre. Es instantáneo y no se rompe:
   `listado.mercadolibre.com.ar/zapatillas-adidas-talle-44`
   El agente con Playwright se reserva solo para lo que no se puede
-  parametrizar por URL.
-- **Terminal**: en Linux, `tmux capture-pane -p`. En Windows no hay
-  equivalente limpio → usar el portapapeles (se copia el error y el daemon
-  lo lee al apretar la tecla). Feo pero infalible en ambos.
+  parametrizar por URL. `buscar_en_sitio` generaliza esto a mercadolibre/
+  google/youtube/amazon.
+- **Terminal**: en Linux, `tmux capture-pane` si la sesión corre dentro de
+  tmux; si no, portapapeles (`wl-paste`/`xclip`) — mismo mecanismo feo
+  pero infalible que se iba a usar para Windows. En este entorno de
+  desarrollo no hay tmux instalado, así que hoy el camino real es
+  portapapeles.
 
 ### `delegar_a_codex`
 
@@ -239,12 +249,12 @@ Camino Codex: 10–30 s. Por eso hay que avisar por voz.
 
 1. **Esqueleto** ✅ — tecla, grabación, Whisper, TTS. Commit `630b3a4`.
 2. **Cerebro** ✅ — Ollama + Qwen3 (`qwen3:4b-instruct`) con tool calling
-   funcionando de punta a punta: `consultar_clima` (Open-Meteo),
-   `abrir_url`, `ajustar_volumen` (wpctl/PipeWire). Probado por voz
-   completo (STT → cerebro → TTS) el 2026-09-12. **Sin commitear todavía**
-   (`git status` tiene los archivos nuevos en `cerebro/` y `herramientas/`
-   más cambios en `main.py`, `config.toml`, `plataforma/linux.py`,
-   `pyproject.toml`/`uv.lock`) — revisar y commitear antes de seguir.
+   de punta a punta. Catálogo completo: `consultar_clima` (Open-Meteo),
+   `reproducir_musica` y `control_media` (Spotify web + playerctl),
+   `abrir_url` y `buscar_en_sitio` (mercadolibre/google/youtube/amazon),
+   `ajustar_volumen` (wpctl/PipeWire), `leer_terminal` (tmux o
+   portapapeles), `consultar_hora`. Commit `5eef997` (clima/volumen/url) +
+   pendiente de commitear (música/terminal/hora, ver `git status`).
 3. **Contexto** — ventana activa, portapapeles, captura bajo demanda.
    No arrancado.
 4. **Codex** — la rama pesada. No arrancado.
@@ -254,19 +264,17 @@ Camino Codex: 10–30 s. Por eso hay que avisar por voz.
    contexto de por qué en la sección de decisiones de plataforma más
    abajo si se agrega, o preguntar — no hay `plataforma/windows.py`).
 
-Estado actual: **fase 2 recién probada y funcionando, pendiente de
-commitear.** Pendientes para retomar mañana:
-- Revisar y commitear los cambios de la fase 2.
-- Bug encontrado y arreglado hoy: `_es_teclado()` en `plataforma/linux.py`
-  descartaba el teclado externo real (receptor Logitech) por exponer
-  `EV_REL` (scroll). Fix: excluir solo por ejes de puntero (`REL_X`/
-  `REL_Y`), no por `EV_REL` en general. Ya está en el working tree.
-- Falta la herramienta de música (`herramientas/musica.py`, prevista en
-  fase 2 original vía URI de búsqueda de Spotify) — no se llegó a
-  escribir hoy, quedó pendiente ("ponemos metálica en Spotify" no tiene
-  todavía una herramienta que lo resuelva).
-- Definir si fase 3 (Contexto) es el próximo paso o si conviene primero
-  sumar `musica.py` y `terminal.py` para cerrar el catálogo de fase 2.
+Estado actual: **fase 2 con el catálogo de herramientas cerrado**
+(salvo `capturar_pantalla`, que espera a fase 3, y `delegar_a_codex`, fase
+4). Pendiente para retomar:
+- Commitear `herramientas/musica.py`, `herramientas/terminal.py`,
+  `herramientas/tiempo.py` y los cambios en `herramientas/web.py` /
+  `cerebro/router.py`.
+- `control_media` necesita `playerctl` instalado (no está en este
+  entorno); probarlo una vez instalado.
+- No hay `tmux` instalado en este entorno, así que `leer_terminal` cae
+  siempre al portapapeles — no probado el camino de tmux.
+- Decidir si fase 3 (Contexto) es el próximo paso.
 
 ---
 

@@ -16,6 +16,8 @@ dependencies = [
     "nvidia-cudnn-cu12>=9.26.0.51",
     "ollama>=0.6.2",
     "httpx>=0.28.1",
+    "pywebview[qt]>=6.2.1",
+    "websockets>=17.1",
 ]
 
 [tool.uv]

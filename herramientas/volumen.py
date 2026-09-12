@@ -12,7 +12,9 @@ _SINK = "@DEFAULT_AUDIO_SINK@"
 def ajustar_volumen(
     accion: Literal["subir", "bajar", "silenciar", "activar"], porcentaje: int = 10
 ) -> str:
-    """Sube, baja, silencia o reactiva el volumen del sistema.
+    """Sube, baja, silencia o reactiva el volumen del sistema. Es solo para
+    el nivel de volumen -- para arrancar o pausar música usá control_media
+    o reproducir_musica, no esto.
 
     porcentaje: cuánto subir o bajar (solo aplica a subir/bajar).
     """

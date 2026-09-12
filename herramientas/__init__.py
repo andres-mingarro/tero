@@ -55,6 +55,14 @@ def catalogo() -> list[dict]:
     return list(_ESQUEMAS)
 
 
+_PREFIJOS_ERROR = ("La herramienta ", "Herramienta desconocida")
+
+
+def es_error(resultado: str) -> bool:
+    """True si `resultado` es uno de los mensajes de error que arma `ejecutar`."""
+    return resultado.startswith(_PREFIJOS_ERROR)
+
+
 def ejecutar(nombre: str, argumentos: dict) -> str:
     """Corre la herramienta `nombre` con los argumentos que decidió el modelo."""
     func = _HERRAMIENTAS.get(nombre)
