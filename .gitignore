@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+
+# Modelos de voz (binarios pesados, se descargan con piper.download_voices)
+voz/modelos/

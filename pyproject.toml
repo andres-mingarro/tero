@@ -1,0 +1,20 @@
+[project]
+name = "tero"
+version = "0.1.0"
+description = "Asistente de voz de escritorio, activado por tecla"
+authors = [
+    { name = "Andres Mingarro", email = "andy.mingarro@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "sounddevice>=0.5",
+    "numpy>=2.0",
+    "faster-whisper>=1.0",
+    "evdev>=1.7",
+    "piper-tts>=1.2",
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "nvidia-cudnn-cu12>=9.26.0.51",
+]
+
+[tool.uv]
+package = false

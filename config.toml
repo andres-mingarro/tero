@@ -1,0 +1,17 @@
+[tecla]
+# Nombre de tecla evdev (ver: python -c "from evdev import ecodes; print([k for k in dir(ecodes) if k.startswith('KEY_')])")
+nombre = "KEY_PAUSE"
+# Umbral en segundos: por debajo es un toque corto (toggle), por encima push-to-talk.
+umbral_toggle_s = 0.35
+
+[audio]
+muestreo_hz = 16000
+canales = 1
+
+[stt]
+modelo = "small"
+device = "auto"
+compute_type = "default"
+
+[tts]
+voz = "es_AR-daniela-high"
