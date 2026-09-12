@@ -1,0 +1,30 @@
+/* Mismos valores que el CSS de boca/index.html, para que el aspecto no
+   cambie al migrar desde la boca de pywebview. */
+
+.tero-boca-cancion {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  text-align: center;
+}
+
+.tero-boca-progreso {
+  spacing: 6px;
+}
+
+.tero-boca-tiempo {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 9px;
+  min-width: 26px;
+}
+
+.tero-boca-pista {
+  height: 2px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 1px;
+}
+
+.tero-boca-relleno {
+  height: 2px;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 1px;
+}

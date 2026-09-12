@@ -1,0 +1,7 @@
+{
+  "uuid": "boca@tero.local",
+  "name": "Boca de Tero",
+  "description": "Onda de audio flotante para el asistente de voz Tero. Cliente del stream de niveles del daemon (ws://127.0.0.1:8765); no hace nada si Tero no está corriendo.",
+  "shell-version": ["50"],
+  "url": "https://github.com/andres-mingarro/tero"
+}

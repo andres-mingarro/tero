@@ -158,6 +158,18 @@ ok "Daemon escuchando${TECLA:+ (tecla: $TECLA)}"
 # Cliente opcional: si no levanta, el daemon sigue andando igual (es una
 # regla del proyecto, no una casualidad). Por eso acá nunca se sale con
 # error, solo se avisa.
+
+# Si está puesta la boca-extensión de GNOME (boca-gnome/), ya hay una boca
+# dibujándose adentro de gnome-shell: levantar además la de pywebview
+# pondría dos ondas superpuestas, y la pesada de las dos.
+if gnome-extensions list --enabled 2>/dev/null | grep -q "^boca@tero.local$"; then
+  ok "Boca: usando la extensión de GNOME (no hace falta la de pywebview)"
+  BOCA_POR_EXTENSION=1
+else
+  BOCA_POR_EXTENSION=0
+fi
+
+if [ $BOCA_POR_EXTENSION -eq 0 ]; then
 paso "Arrancando la boca (overlay)"
 : >"$LOG_BOCA"
 QT_QPA_PLATFORM=xcb uv run python -m boca.ventana >>"$LOG_BOCA" 2>&1 &
@@ -175,6 +187,7 @@ if [ $boca_lista -eq 1 ]; then
 else
   aviso "La boca no levantó (el daemon sigue andando igual). Ver $LOG_BOCA"
 fi
+fi  # fin del bloque de la boca de pywebview
 
 # --- listo ----------------------------------------------------------------
 printf '\n  %sTodo listo.%s Ctrl+C para cortar todo.\n' "$C_OK" "$C_FIN"
