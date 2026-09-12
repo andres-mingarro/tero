@@ -25,6 +25,9 @@ def _asegurar_libs_cuda() -> None:
     actual = os.environ.get("LD_LIBRARY_PATH", "")
     os.environ["LD_LIBRARY_PATH"] = ":".join(libs) + (":" + actual if actual else "")
     os.environ["_TERO_CUDA_LIBS_OK"] = "1"
+    # execv no hereda el flag -u: sin esto, stdout queda bufferizado en
+    # bloque (no es una tty) y los prints del daemon no se ven en vivo.
+    os.environ["PYTHONUNBUFFERED"] = "1"
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
@@ -37,6 +40,7 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 
+from cerebro.router import Cerebro
 from plataforma import crear_plataforma
 from voz.stt import STT
 from voz.tts import TTS
@@ -91,6 +95,7 @@ class Tero:
         self._stt = STT(**config["stt"])
         print("Cargando voz...")
         self._tts = TTS(**config["tts"])
+        self._cerebro = Cerebro(**config["cerebro"])
 
         self._grabando = False
         self._modo_toggle = False
@@ -132,9 +137,12 @@ class Tero:
         self._plataforma.notificar(texto or "(no se entendió nada)")
         if not texto:
             return
-        self._tts.hablar(f"Dijiste: {texto}")
+        respuesta = self._cerebro.responder(texto)
         t2 = time.monotonic()
-        print(f"tts ({t2 - t1:.2f}s), total ({t2 - t0:.2f}s)")
+        print(f"cerebro ({t2 - t1:.2f}s): {respuesta!r}")
+        self._tts.hablar(respuesta)
+        t3 = time.monotonic()
+        print(f"tts ({t3 - t2:.2f}s), total ({t3 - t0:.2f}s)")
 
     def correr(self) -> None:
         self._plataforma.escuchar_tecla(self.on_down, self.on_up)

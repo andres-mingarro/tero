@@ -10,10 +10,23 @@ from evdev import InputDevice, ecodes, list_devices
 from plataforma.base import Plataforma
 
 
+_EJES_PUNTERO = {ecodes.REL_X, ecodes.REL_Y}
+
+
 def _es_teclado(dispositivo: InputDevice) -> bool:
-    """Filtra ratones/mandos: un teclado real tiene teclas alfabéticas."""
-    teclas = dispositivo.capabilities().get(ecodes.EV_KEY, [])
-    return ecodes.KEY_A in teclas and ecodes.KEY_Z in teclas
+    """Filtra ratones/mandos: un teclado real tiene teclas alfabéticas y
+    nunca reporta movimiento de puntero (REL_X/REL_Y). Excluir por
+    cualquier EV_REL no alcanza: varios receptores combo (Logitech, Corsair)
+    exponen la rueda de scroll (REL_HWHEEL) en la misma interfaz del
+    teclado sin ser un mouse. Un mouse con botones programables remapeados
+    a teclas (ej. G903) sigue teniendo REL_X/REL_Y porque es, de hecho,
+    un mouse."""
+    capacidades = dispositivo.capabilities()
+    teclas = capacidades.get(ecodes.EV_KEY, [])
+    tiene_alfabeto = ecodes.KEY_A in teclas and ecodes.KEY_Z in teclas
+    ejes_rel = set(capacidades.get(ecodes.EV_REL, []))
+    es_puntero = bool(ejes_rel & _EJES_PUNTERO)
+    return tiene_alfabeto and not es_puntero
 
 
 def _teclados() -> list[InputDevice]:

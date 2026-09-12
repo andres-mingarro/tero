@@ -237,16 +237,36 @@ Camino Codex: 10–30 s. Por eso hay que avisar por voz.
 
 ## Fases
 
-1. **Esqueleto** — tecla, grabación, Whisper, TTS. Que repita lo que se
-   dijo. Sirve para medir latencia real. (~1 fin de semana)
-2. **Cerebro** — Ollama + Qwen3 con tres herramientas: clima, abrir URL,
-   volumen. Acá ya es un asistente. (~1 fin de semana)
+1. **Esqueleto** ✅ — tecla, grabación, Whisper, TTS. Commit `630b3a4`.
+2. **Cerebro** ✅ — Ollama + Qwen3 (`qwen3:4b-instruct`) con tool calling
+   funcionando de punta a punta: `consultar_clima` (Open-Meteo),
+   `abrir_url`, `ajustar_volumen` (wpctl/PipeWire). Probado por voz
+   completo (STT → cerebro → TTS) el 2026-09-12. **Sin commitear todavía**
+   (`git status` tiene los archivos nuevos en `cerebro/` y `herramientas/`
+   más cambios en `main.py`, `config.toml`, `plataforma/linux.py`,
+   `pyproject.toml`/`uv.lock`) — revisar y commitear antes de seguir.
 3. **Contexto** — ventana activa, portapapeles, captura bajo demanda.
-4. **Codex** — la rama pesada.
-5. **Boca** — independiente, vía WebSocket.
-6. **Linux** — escribir `plataforma/linux.py`.
+   No arrancado.
+4. **Codex** — la rama pesada. No arrancado.
+5. **Boca** — independiente, vía WebSocket. No arrancado.
+6. **Linux** — escribir `plataforma/linux.py`. Ya existe y funciona (se
+   adelantó: desarrollo pasó a Linux desde el arranque del proyecto, ver
+   contexto de por qué en la sección de decisiones de plataforma más
+   abajo si se agrega, o preguntar — no hay `plataforma/windows.py`).
 
-Estado actual: **fase 0, nada escrito.**
+Estado actual: **fase 2 recién probada y funcionando, pendiente de
+commitear.** Pendientes para retomar mañana:
+- Revisar y commitear los cambios de la fase 2.
+- Bug encontrado y arreglado hoy: `_es_teclado()` en `plataforma/linux.py`
+  descartaba el teclado externo real (receptor Logitech) por exponer
+  `EV_REL` (scroll). Fix: excluir solo por ejes de puntero (`REL_X`/
+  `REL_Y`), no por `EV_REL` en general. Ya está en el working tree.
+- Falta la herramienta de música (`herramientas/musica.py`, prevista en
+  fase 2 original vía URI de búsqueda de Spotify) — no se llegó a
+  escribir hoy, quedó pendiente ("ponemos metálica en Spotify" no tiene
+  todavía una herramienta que lo resuelva).
+- Definir si fase 3 (Contexto) es el próximo paso o si conviene primero
+  sumar `musica.py` y `terminal.py` para cerrar el catálogo de fase 2.
 
 ---
 
