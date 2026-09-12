@@ -159,26 +159,64 @@ Ya viene con valores razonables. Lo más probable que quieras ajustar:
 ## Arrancar
 
 ```bash
-uv run python main.py
+./tero
 ```
 
-Queda escuchando la tecla configurada. Los logs de la terminal muestran
-transcripción, qué herramienta se llamó, y tiempos de cada etapa.
+Levanta todo: verifica las dependencias (Ollama y el modelo, token de
+Spotify, binarios de sistema), arranca el daemon, espera a que carguen
+Whisper y la voz, abre la boca, y después muestra el log en vivo. `Ctrl+C`
+corta el daemon y la boca juntos.
+
+```
+Tero
+  ✓ No hay otra instancia corriendo
+  ✓ Ollama activo (modelo qwen3:4b-instruct)
+  ✓ Spotify logueado
+  ✓ Binarios de sistema presentes
+  … Arrancando el daemon (carga Whisper y la voz, tarda unos segundos)
+  ✓ Modelo de transcripción cargado
+  ✓ Voz cargada
+  ✓ Daemon escuchando (tecla: KEY_RIGHTCTRL)
+  ✓ Boca en pantalla
+
+  Todo listo. Ctrl+C para cortar todo.
+```
+
+Se niega a arrancar si ya hay otro Tero corriendo: dos daemons cargan dos
+veces Whisper `large-v3` en la GPU y el segundo muere con `CUDA failed
+with error out of memory`.
+
+Los logs quedan en `logs/` (ignorado por git): `tero.log` tiene el arranque
+paso a paso más la salida del daemon (transcripción, qué herramienta se
+llamó, tiempos de cada etapa), `boca.log` el ruido de la ventana. Cada
+corrida empieza un log nuevo y conserva el anterior como `.1`.
+
+Para tenerlo a mano desde cualquier lado:
+
+```bash
+ln -s "$PWD/tero" ~/.local/bin/tero   # opcional
+```
+
+### Arrancar cada pieza por separado
+
+Para desarrollo, si querés correr solo una parte:
+
+```bash
+uv run python main.py                          # solo el daemon
+QT_QPA_PLATFORM=xcb uv run python -m boca.ventana   # solo la boca
+```
 
 ### La boca (overlay opcional)
 
 Ventana flotante con una onda animada que reacciona a la voz de Tero, al
 micrófono mientras escucha, y a la música de fondo, más el nombre/progreso
 de lo que suena en Spotify (se oculta solo si queda pausado 30s). Es un
-cliente aparte, opcional — el daemon principal funciona sin ella.
+cliente aparte, opcional — el daemon principal funciona sin ella, y `./tero`
+sigue adelante si no levanta.
 
-```bash
-QT_QPA_PLATFORM=xcb uv run python -m boca.ventana
-```
-
-El `QT_QPA_PLATFORM=xcb` es necesario en sesiones Wayland nativas (como
-GNOME): sin eso, la ventana no puede pedirle al gestor de ventanas que se
-quede "siempre encima" mientras habla.
+El `QT_QPA_PLATFORM=xcb` (que `./tero` ya pone solo) es necesario en
+sesiones Wayland nativas (como GNOME): sin eso, la ventana no puede pedirle
+al gestor de ventanas que se quede "siempre encima" mientras habla.
 
 ## Herramientas disponibles
 

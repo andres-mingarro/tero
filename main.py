@@ -40,10 +40,12 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 
+import salud
 from boca.audio_sistema import MonitorAudioSistema
 from boca.server import ServidorBoca
 from cerebro.router import Cerebro
 from herramientas import musica
+from herramientas._ducking import Ducker
 from plataforma import crear_plataforma
 from voz.stt import STT
 from voz.tts import TTS
@@ -119,7 +121,12 @@ class Tero:
         self._cerebro = Cerebro(**config["cerebro"])
         self._boca = self._crear_boca()
         self._estado_voz = "idle"
+        self._ducker = Ducker()
         self._monitor_audio = self._crear_monitor_audio()
+        self._motivo_corte: str | None = None
+        self._monitor_salud = salud.MonitorSalud(
+            on_critico=self._salud_critica, on_aviso=self._salud_aviso
+        )
 
         self._grabando = False
         self._modo_toggle = False
@@ -154,7 +161,17 @@ class Tero:
             return None
 
     def _estado_boca(self, nombre: str) -> None:
+        anterior = self._estado_voz
         self._estado_voz = nombre
+        # Duckear música mientras se escucha/piensa/habla (no solo mientras
+        # se graba): si se restaurara el volumen entre "pensando" y
+        # "hablando" se oiría un salto para arriba y otro para abajo justo
+        # antes de que Tero conteste. Solo se toca en las transiciones
+        # hacia/desde idle -- entre estados no-idle no hay nada que hacer.
+        if nombre != "idle" and anterior == "idle":
+            self._ducker.activar()
+        elif nombre == "idle" and anterior != "idle":
+            self._ducker.desactivar()
         if self._boca is not None:
             self._boca.estado(nombre)
 
@@ -235,15 +252,33 @@ class Tero:
         if self._boca is not None:
             self._boca.nivel(nivel)
 
+    def _salud_critica(self, motivo: str) -> None:
+        # Solo deja el pedido anotado: cerrar de verdad lo hace el bucle
+        # principal, que es el dueño del proceso. Cerrar desde el hilo del
+        # monitor dejaría a medias lo que esté pasando (una grabación
+        # abierta, el TTS hablando).
+        print(f"\n*** Cerrando Tero para cuidar el equipo: {motivo}")
+        self._plataforma.notificar(f"Cierro Tero: {motivo}")
+        self._motivo_corte = motivo
+
+    def _salud_aviso(self, texto: str) -> None:
+        print(f"(salud: {texto})")
+        self._plataforma.notificar(texto)
+
     def correr(self) -> None:
         self._plataforma.escuchar_tecla(self.on_down, self.on_up)
+        self._monitor_salud.arrancar()
         print(f"Tero escuchando. Mantené {self._config['tecla']['nombre']} para hablar.")
         try:
-            while True:
+            while self._motivo_corte is None:
                 time.sleep(0.5)
                 self._actualizar_cancion_boca()
         except KeyboardInterrupt:
             print("\nChau.")
+            return
+        # Se sale por el monitor de salud: código propio para que el
+        # lanzador lo distinga de una caída de verdad.
+        sys.exit(salud.CODIGO_SALIDA_SALUD)
 
     def _actualizar_cancion_boca(self) -> None:
         # Cada ~5s (no en cada tick de 0.5s) para no golpear la API de

@@ -56,3 +56,9 @@ Por las dudas, para no confundir con lo de arriba: `wl-paste`, `xclip` y
 `notify-send` (usados por `leer_terminal` y `Plataforma.notificar`) ya
 venían con el escritorio GNOME/Wayland de esta máquina — no se instalaron
 para Tero.
+
+Lo mismo con `wpctl` (WirePlumber) y `pw-dump` (PipeWire): vienen con el
+stack de audio del sistema. `wpctl` lo usa `ajustar_volumen` sobre el sink
+por defecto, y los dos juntos los usa el ducking de música
+(`herramientas/_ducking.py`) para bajarle el volumen al stream de Spotify
+sin tocar el sink que usa el TTS para salir.

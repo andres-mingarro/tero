@@ -332,6 +332,73 @@
       <div class="tags"><span class="tag">feature</span></div>
       <p>Si la música queda en pausa (o se detiene) 30 segundos seguidos, el reproductor de la boca (nombre de canción + barra de progreso) desaparece en vez de quedar congelado ahí para siempre. De paso se encontró que la barra/tiempos vivían en un bloque HTML separado del nombre de la canción (<code>#fila-progreso</code>, afuera de <code>#info</code>) que nunca se ocultaba -- ahora los dos bloques se muestran/ocultan juntos.</p>
     </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>Ducking de música</strong> (<code>herramientas/_ducking.py</code>, no es una herramienta del modelo): mientras Tero escucha, piensa o habla, la música baja al 10% de forma progresiva, y vuelve sola al volumen real al terminar. A pedido del usuario, no se restaura entre "pensando" y "hablando": si hay que contestar, se queda abajo hasta el final, para no pegar un salto para arriba y otro para abajo justo antes de hablar. El enganche está en <code>_estado_boca()</code> de <code>main.py</code>, sobre las transiciones hacia/desde <code>idle</code> — no sobre cada estado — así el ciclo entero queda cubierto con dos llamadas.</p>
+      <p>Dos vías se probaron en vivo y se descartaron antes de dar con la buena:</p>
+      <ul>
+        <li><code>playerctl volume</code> (MPRIS, lo mismo que usa <code>control_media</code>): <strong>no funciona</strong>. El cliente de Spotify para Linux no implementa <code>SetVolume</code> vía MPRIS — el comando devuelve éxito y no cambia absolutamente nada. Confirmado también contra Chromium.</li>
+        <li><strong>Web API de Spotify</strong> (<code>/me/player/volume</code>): sí cambia el volumen, pero <code>/me/player/devices</code> tarda 1-3s en reflejar un PUT propio (eventual consistency), y cada paso de la rampa sería un request HTTP. Demasiado lento, y releer para calcular el paso siguiente da valores viejos que arruinan el cálculo.</li>
+      </ul>
+      <p>Lo que funciona: el cliente de Spotify aplica su volumen sobre su <strong>propio stream de salida en PipeWire</strong> (<code>wpctl status</code> lo lista bajo "Streams", con node id propio, distinto del sink del sistema). Ajustarlo ahí es local e instantáneo (~10ms) y no toca el sink que usa el TTS para salir — que es justo el motivo de no usar <code>ajustar_volumen</code>/<code>wpctl</code> sobre <code>@DEFAULT_AUDIO_SINK@</code>: bajar el maestro se llevaría puesta la voz de Tero. El nodo se busca con <code>pw-dump</code> (JSON, filtrando por <code>application.name</code>), no parseando el árbol de texto de <code>wpctl</code>.</p>
+      <p>Detalle que costó encontrar: <code>wpctl get-volume</code> <strong>redondea a 2 decimales</strong>. Releer el volumen en cada paso para calcular el siguiente hace que la rampa se trabe apenas la diferencia baja de ~0.01 (el paso calculado es más chico que la resolución de lectura, así que devuelve siempre el mismo valor y nunca converge). Se lee una sola vez por proceso y de ahí en más el <code>Ducker</code> lleva la cuenta él mismo.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p><strong>Bug de fondo encontrado, y corrige el diagnóstico de dos entradas anteriores de esta misma bitácora.</strong> Repetir un pedido ya hecho ("siguiente canción" dos veces seguidas) hacía que el modelo contestara <em>"listo, siguiente"</em> en voz sin llamar a la herramienta — decía que había saltado de tema, y no saltaba nada. Visto en el log dos veces seguidas, o sea reproducible, no aleatorio.</p>
+      <p>La causa no era el modelo ni el muestreo: era <strong>Tero envenenándose el propio contexto</strong>. Después de cada tool call, el router fabricaba una nota en prosa en el historial (<em>"Nota interna: en el turno anterior usaste la herramienta control_media y el resultado fue: Listo, siguiente."</em>). El modelo leía eso como "a este pedido se contesta <em>escribiendo</em> ese texto" y lo recitaba en vez de volver a invocar la herramienta.</p>
+      <p>Medido con el pedido repetido, 12 corridas por variante:</p>
+      <ul>
+        <li>Nota en prosa <strong>con</strong> el texto del resultado (lo que había): <strong>0/12</strong> tool calls.</li>
+        <li>Nota en prosa <strong>sin</strong> el texto del resultado: <strong>0/12</strong>. Clave: no depende de la redacción, no hay frase que lo arregle.</li>
+        <li>Transcript nativo (<code>assistant</code> con <code>tool_calls</code> + mensaje <code>role: tool</code>): <strong>12/12</strong>.</li>
+      </ul>
+      <p>Fix global: el historial pasa a guardar el transcript nativo de tool calling, que es el formato con el que el modelo fue entrenado. Se guarda <strong>por turnos enteros</strong> (<code>list[list[dict]]</code>) y no como lista plana de mensajes, porque recortar por cantidad de mensajes podía partir un turno al medio y dejar un <code>tool</code> huérfano sin la llamada que lo originó.</p>
+      <p>Con eso se borraron los parches que venían tapando este mismo bug: <code>_herramienta_dicha_en_vez_de_llamada()</code> entero (el de la entrada de más arriba, más una variante para "listo, siguiente" que se había agregado ese mismo día y ya se quedaba corta otra vez), y <code>sin_argumentos_obligatorios()</code> en <code>herramientas/__init__.py</code>, que quedó sin uso. También se corrigió el comentario de <code>temperature: 0.2</code>: la entrada vieja concluía "aleatoriedad del muestreo, no un bug determinístico" y descartaba el historial como causa — era exactamente al revés, y por eso bajar la temperatura nunca lo terminó de arreglar. El parámetro se deja igual (respuestas más predecibles), pero ya no como fix de esto.</p>
+      <p>Regresión sobre el <code>Cerebro</code> real, multi-turno y con las herramientas mockeadas: <strong>14/14 escenarios en 8/8</strong>, incluidas las tres frases que habían motivado el fallback borrado ("cambiá de canción", "poné play", "ponme play") — ahora pasan sin parche — y el seguimiento con pronombres ("poné metallica" → "pausala"), que era el motivo de tener historial.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">decisión</span></div>
+      <p>Criterio que queda para el futuro, anotado también en <code>CLAUDE.md</code>: si el modelo chico empieza a portarse mal, <strong>sospechar primero de lo que Tero le mete en el contexto</strong> (historial, notas, formato de los mensajes) antes de culpar al sampling o de sumar otra regla al prompt. Y medirlo: correr la misma entrada 12 veces y contar tool calls por variante de contexto distingue un bug determinístico del ruido de muestreo. Los parches de string sobre lo que el modelo "dijo" se rompen con cada frase nueva — como dijo el usuario, les falta una letra y ya no andan.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>Lanzador <code>./tero</code></strong>: levanta todo de una (daemon + boca) con log paso a paso, y <code>Ctrl+C</code> corta los dos juntos. Antes había que acordarse de dos comandos, uno con <code>QT_QPA_PLATFORM=xcb</code> adelante.</p>
+      <ul>
+        <li>Verifica las dependencias externas <em>antes</em> de arrancar (Ollama levantado y con el modelo de <code>config.toml</code> bajado, token de Spotify, <code>playerctl</code>/<code>wpctl</code>/<code>pw-dump</code>/<code>wmctrl</code>/<code>notify-send</code>) en vez de dejar que cada una falle más tarde y por separado adentro del daemon, donde el error aparece como un traceback a mitad de una conversación. Lo que no es fatal (Spotify sin loguear, un binario que falta) avisa y sigue.</li>
+        <li><strong>Una sola instancia</strong>, vía <code>flock</code> más un <code>pgrep</code> por si el daemon se lanzó a mano. No es decorativo: hoy mismo, al arrancar un segundo daemon sin darse cuenta de que ya había uno, el segundo murió con <code>CUDA failed with error out of memory</code> — dos Whisper <code>large-v3</code> no entran juntos en la GPU.</li>
+        <li>Espera hitos reales del log (<em>"Cargando modelo de transcripción"</em>, <em>"Cargando voz"</em>, <em>"Tero escuchando"</em>) en vez de dormir un rato fijo, y si el daemon se muere mientras arranca corta enseguida mostrando las últimas líneas.</li>
+        <li>La boca es opcional de verdad: si no levanta en 30s, avisa y deja el daemon andando (es una regla del proyecto, no una casualidad).</li>
+        <li>Logs en <code>logs/</code> (agregado a <code>.gitignore</code>), con el arranque paso a paso y la salida del daemon en el mismo archivo. Log nuevo por corrida, conservando el anterior como <code>.1</code>.</li>
+      </ul>
+      <p>Tres bugs propios encontrados probándolo, todos de manejo de procesos:</p>
+      <ul>
+        <li><code>Ctrl+C</code> dejaba el script <strong>colgado para siempre</strong>: la función de limpieza hacía <code>wait</code> sin matar antes el <code>tail -f</code> del log, que es hijo del script y no termina solo. Mataba el daemon y la boca y después se quedaba esperando al tail.</li>
+        <li>El trap está en <code>EXIT</code> además de <code>INT</code>/<code>TERM</code>, así que la limpieza corría dos veces (una por la señal, otra por la salida). Guard con una bandera.</li>
+        <li>Una segunda corrida rotaba y truncaba el log <em>antes</em> de chequear el lock, y recién después se rechazaba a sí misma — dejándole el log vacío a la corrida buena, que se quedaba esperando para siempre una línea que ya no existía. La rotación pasó a ir después de los guards.</li>
+      </ul>
+      <p>Además, matar el <code>uv run</code> a secas puede dejar el python huérfano y vivo (son dos procesos: el wrapper y el intérprete), así que la limpieza manda <code>TERM</code> al hijo con <code>pkill -P</code> y al padre.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>Monitor de salud del equipo</strong> (<code>salud.py</code>), a partir de la pregunta del usuario de si Tero puede quemar la placa de video o colgar el sistema.</p>
+      <p>Respuesta corta, medida en la máquina: <strong>quemar la placa, no.</strong> El control térmico vive en el firmware de la GPU, por debajo del sistema operativo. <code>nvidia-smi -q -d TEMPERATURE</code> en esta RTX 5060 Laptop reporta límite de fábrica 87 C, slowdown por hardware 2 C arriba y apagado 5 C arriba — la placa se frena y se apaga sola, y ningún proceso puede desactivarlo. Los riesgos reales son de estabilidad de la sesión: <strong>quedarse sin RAM</strong> (el único que puede colgar el equipo entero: 14 GB, con Whisper large-v3 y Ollama encima, y el escritorio queda inusable swapeando bastante antes de que el OOM killer elija a alguien) y <strong>quedarse sin VRAM</strong> (ya pasado hoy con el segundo daemon; como esta GPU además maneja el escritorio, la presión lo pone lento).</p>
+      <p>De ahí el criterio del módulo: <strong>la RAM corta, lo térmico solo avisa.</strong> Cortar por temperatura sería redundante con lo que la placa ya hace sola; solo corta si el slowdown por hardware se sostiene ~1 minuto, que ya habla de un problema de ventilación. Detalles que valen:</p>
+      <ul>
+        <li>Para lo térmico se lee <code>clocks_throttle_reasons.hw_thermal_slowdown</code>, no un umbral en grados hardcodeado: es la placa diciendo "estoy en mi límite", con el límite real de <em>esa</em> placa, sin adivinar un número por modelo.</li>
+        <li>Para la RAM se usa <code>MemAvailable</code> de <code>/proc/meminfo</code> (no "free"): es la estimación del kernel de cuánto se puede pedir sin entrar a swapear, que es la cuenta que importa.</li>
+        <li>Toda condición exige varias muestras seguidas antes de actuar — un pico puntual (Chrome abriendo algo pesado) no tiene que cortar una conversación a la mitad. Probado explícitamente.</li>
+        <li>El aviso va por <code>notify-send</code> y por el log, <strong>nunca por voz</strong>: si el problema es que falta memoria, levantar el TTS para anunciarlo la empeora.</li>
+        <li>El monitor no llama a <code>sys.exit</code> desde su hilo: deja el motivo anotado y cierra el bucle principal, que es el dueño del proceso, para no cortar a la mitad una grabación abierta o el TTS hablando.</li>
+        <li>Sale con código 3, que <code>./tero</code> distingue de una caída de verdad (muestra el motivo y sale con 0, no como error). Verificado que <code>uv run</code> propaga el código de salida.</li>
+      </ul>
+      <p>Probado de dos formas: con las lecturas mockeadas para los seis escenarios (normal, RAM crítica, RAM baja, GPU frenándose, VRAM casi llena, equipo sin NVIDIA) y end-to-end bajando el umbral de RAM a un valor absurdo para forzar un corte real — arrancó entero, disparó, notificó, cerró limpio y el lanzador lo reportó como cierre por salud y no como caída.</p>
+    </div>
   </section>
 </main>
 </body>

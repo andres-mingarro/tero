@@ -4,3 +4,6 @@ __pycache__/
 
 # Modelos de voz (binarios pesados, se descargan con piper.download_voices)
 voz/modelos/
+
+# Logs del lanzador (./tero)
+logs/

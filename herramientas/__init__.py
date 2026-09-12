@@ -55,15 +55,6 @@ def catalogo() -> list[dict]:
     return list(_ESQUEMAS)
 
 
-def sin_argumentos_obligatorios() -> set[str]:
-    """Nombres de las herramientas que se pueden llamar sin argumentos."""
-    return {
-        esquema["function"]["name"]
-        for esquema in _ESQUEMAS
-        if not esquema["function"]["parameters"]["required"]
-    }
-
-
 _PREFIJOS_ERROR = ("La herramienta ", "Herramienta desconocida")
 
 

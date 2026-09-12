@@ -120,7 +120,8 @@ tero/
   cerebro/           router.py, prompt.py
   herramientas/      musica.py, clima.py, web.py, mapas.py, celular.py,
                      terminal.py, tiempo.py, volumen.py,
-                     _spotify_auth.py, _telegram.py, codex.py (fase 4)
+                     _spotify_auth.py, _telegram.py, _ducking.py,
+                     codex.py (fase 4)
   boca/              server.py, ventana.py, audio_sistema.py, index.html,
                      siriwave.umd.js (vendorizada)
   config.toml
@@ -182,6 +183,20 @@ Notas por herramienta:
   anterior sobre lo que ya esté sonando (Spotify, navegador, etc.) —
   requiere tenerlo instalado, no viene por defecto. Requiere Spotify
   Premium (la Web API no deja reproducir en cuentas free).
+  **Ducking** (`herramientas/_ducking.py`, no es una herramienta del
+  modelo): mientras Tero escucha/piensa/habla, la música baja al 10% —
+  progresivo, no de golpe — y vuelve sola al volumen real al terminar
+  (no entre "pensando" y "hablando": si hay que hablar, se queda abajo
+  hasta el final para no pegar un salto para arriba y otro para abajo
+  antes de contestar). Dos vías descartadas en el camino: `playerctl
+  volume` no sirve porque el cliente de Spotify para Linux no implementa
+  `SetVolume` vía MPRIS (éxito reportado, cero efecto real); la Web API
+  de Spotify (`/me/player/volume`) sí cambia el volumen pero
+  `/me/player/devices` tarda 1-3s en reflejarlo (eventual consistency),
+  demasiado lento para una rampa. Lo que funciona: el propio volumen del
+  stream de Spotify en PipeWire (`wpctl status` → "Streams", node id
+  propio, no el sink del sistema) — instantáneo y no toca el sink que
+  usa el TTS para salir.
 - **Mapas**: `calcular_viaje` geocodifica con Open-Meteo (misma API que el
   clima, sin clave) y calcula distancia/tiempo real con el servidor demo
   de OSRM (gratis, sin clave), devolviendo también la URL real de Google
@@ -282,6 +297,38 @@ Camino Codex: 10–30 s. Por eso hay que avisar por voz.
 
 ---
 
+## Salud del equipo
+
+**Tero no puede quemar la placa de video.** El control térmico vive en el
+firmware de la GPU, por debajo del sistema operativo: se frena sola
+(slowdown) al llegar a su límite y se apaga sola si lo pasa. En esta
+máquina (RTX 5060 Laptop, 8 GB) el límite de fábrica es 87 C, slowdown por
+hardware 2 C arriba, apagado 5 C arriba. Ningún proceso puede desactivar
+eso. No hace falta vigilar temperatura para proteger el hardware.
+
+Los riesgos reales son de estabilidad de la sesión, no de hardware, y son
+dos:
+
+- **Quedarse sin RAM** — el único que puede colgar el equipo entero. Son
+  14 GB, y Whisper `large-v3` + Ollama no son livianos. Con `MemAvailable`
+  cerca de cero, el escritorio queda inusable swapeando bastante antes de
+  que el OOM killer elija a alguien (y puede no elegir a Tero).
+- **Quedarse sin VRAM** — pasó de verdad al arrancar un segundo daemon sin
+  querer: murió con `CUDA out of memory`. No rompe nada, pero esta GPU
+  además maneja el escritorio, así que la presión de VRAM lo pone lento.
+
+`salud.py` vigila esto en segundo plano (cada 5 s) con un criterio simple:
+**la RAM corta, lo térmico solo avisa** (cortar por temperatura sería
+redundante con lo que la placa ya hace sola; solo corta si el slowdown por
+hardware se sostiene ~1 min, que ya habla de un problema de ventilación).
+Para lo térmico se lee `clocks_throttle_reasons.hw_thermal_slowdown` y no
+un umbral en grados hardcodeado: es la placa diciendo "estoy en mi
+límite", con el límite real de esa placa. Toda condición exige varias
+muestras seguidas — un pico puntual no corta una conversación a la mitad.
+Al cortar, avisa por `notify-send` y por el log (nunca por voz: si falta
+memoria, levantar el TTS para anunciarlo la empeora) y sale con código 3,
+que `./tero` distingue de una caída de verdad.
+
 ## Seguridad
 
 - Un agente con acceso a shell ejecutando lo que *entendió* de la voz es
@@ -297,12 +344,24 @@ Camino Codex: 10–30 s. Por eso hay que avisar por voz.
 1. **Esqueleto** ✅ — tecla, grabación, Whisper, TTS. Commit `630b3a4`.
 2. **Cerebro** ✅ — Ollama + Qwen3 (`qwen3:4b-instruct`) con tool calling
    de punta a punta, multi-ronda (hasta 4 llamadas por turno para pedidos
-   compuestos), memoria corta (últimos 2 intercambios), y varias redes de
-   seguridad determinísticas en código contra fallas de sampling del
-   modelo chico (ver `cerebro/router.py`: filtro de preguntas de
-   seguimiento colgadas, fallback cuando el modelo dice una herramienta
-   en vez de invocarla, `temperature: 0.2`). Catálogo completo (ver
+   compuestos), memoria corta (últimos 2 turnos). Catálogo completo (ver
    sección de Herramientas más arriba). Commits `5eef997` y `bad3ed1`.
+
+   **El historial va en el formato nativo de tool calling** (un mensaje
+   `assistant` con `tool_calls` y uno `tool` con el resultado), y esto no
+   es un detalle: antes se fabricaba una nota en prosa ("en el turno
+   anterior usaste la herramienta X y el resultado fue: Y") y eso le
+   enseñaba al modelo que a ese pedido se contesta *escribiendo*. Medido
+   repitiendo "siguiente canción": **0/12 tool calls con la nota en
+   prosa, 12/12 con el transcript nativo** — y sacarle el texto del
+   resultado a la nota seguía dando 0/12, o sea no dependía de la
+   redacción. Ese único bug se había estado tapando con parches de string
+   en el router (detectar que el modelo "dijo" el nombre de la acción en
+   vez de invocarla) que se rompían con cada frase nueva; se borraron
+   todos, y las frases que los motivaban ahora pasan 8/8 sin ellos.
+   Lección para el futuro: si el modelo chico empieza a portarse mal,
+   sospechar primero de lo que Tero le está metiendo en el contexto,
+   antes de culpar al sampling o de agregar otra regla al prompt.
 3. **Contexto** — ventana activa, portapapeles, captura bajo demanda.
    No arrancado.
 4. **Codex** — la rama pesada. No arrancado.

@@ -26,7 +26,7 @@ import herramientas.tiempo  # noqa: F401
 import herramientas.volumen  # noqa: F401
 import herramientas.web  # noqa: F401
 from cerebro.prompt import PROMPT_SISTEMA
-from herramientas import catalogo, ejecutar, es_error, sin_argumentos_obligatorios
+from herramientas import catalogo, ejecutar, es_error
 
 _MAX_TOKENS_RESPUESTA = 200
 _TIMEOUT_S = 10.0
@@ -54,39 +54,6 @@ _HERRAMIENTAS_SILENCIOSAS = {"reproducir_musica", "reproducir_musica_aleatoria",
 _TURNOS_HISTORIAL = 2
 
 
-_ACCIONES_MEDIA = {"reproducir", "pausar", "siguiente", "anterior"}
-
-
-def _herramienta_dicha_en_vez_de_llamada(texto: str) -> tuple[str, dict] | None:
-    """Detecta cuando el modelo dijo en voz el nombre de una acción o de
-    una herramienta en vez de invocarla -- visto en vivo tres veces, cada
-    vez con una firma de texto distinta ("cambiá de canción" -> dijo
-    'reproducir siguiente'; "poné play" -> dijo 'reproducir'; "ponme
-    play" -> dijo literalmente 'reproducir_musica_aleatoria'), pese a que
-    la temperatura ya está baja (0.2) y el prompt ya dice que hay que usar
-    la herramienta. No es una falla que se arregle bajando más la
-    temperatura (ya casi no hay margen) ni con otra frase de prompt (esa
-    regla ya existe y falla igual) -- es la misma clase de error cada vez
-    y tiene una firma exacta y detectable en código: la respuesta entera
-    es, literal, el nombre de una acción o de una herramienta real. Se
-    ejecuta la herramienta correspondiente en vez de tratarlo como charla.
-
-    Devuelve (nombre_herramienta, argumentos) o None si no aplica. Solo
-    contempla herramientas sin argumentos obligatorios (más el caso
-    puntual de control_media, cuyo único argumento es la propia acción
-    que el modelo dijo).
-    """
-    limpio = texto.strip().lower().rstrip(".!?")
-    if limpio in _ACCIONES_MEDIA:
-        return "control_media", {"accion": limpio}
-    palabras = limpio.split()
-    if len(palabras) == 2 and palabras[0] == "reproducir" and palabras[1] in _ACCIONES_MEDIA:
-        return "control_media", {"accion": palabras[1]}
-    if limpio in sin_argumentos_obligatorios():
-        return limpio, {}
-    return None
-
-
 def _sin_pregunta_de_seguimiento(texto: str) -> str:
     """Corta cualquier pregunta colgada al final de una respuesta hablada.
 
@@ -109,84 +76,79 @@ class Cerebro:
     def __init__(self, modelo: str = "qwen3:4b-instruct"):
         self._modelo = modelo
         self._cliente = Client(timeout=_TIMEOUT_S)
-        self._historial: list[dict] = []
+        # Una lista por turno, no una lista plana de mensajes: un turno con
+        # herramientas ocupa varios mensajes (assistant con tool_calls +
+        # un tool por resultado) y recortar por cantidad de mensajes podría
+        # cortarlo al medio, dejando un "tool" huérfano sin la llamada que
+        # lo originó. Recortando por turnos enteros eso no puede pasar.
+        self._historial: list[list[dict]] = []
 
     def _chat(self, mensajes: list, con_herramientas: bool):
         return self._cliente.chat(
             model=self._modelo,
             messages=mensajes,
             tools=catalogo() if con_herramientas else None,
-            # temperature baja: el muestreo por defecto a veces "describe"
-            # la tool call en palabras en vez de emitirla de verdad (visto
-            # en vivo con "siguiente tema" -> dijo "reproducir siguiente"),
-            # sin ningún patrón fijo -- es aleatoriedad del muestreo, no un
-            # bug de código. Menos temperatura = tool calling más confiable,
-            # a costa de un poco menos de variedad en cómo habla.
+            # temperature baja: menos variedad al hablar, a cambio de
+            # respuestas más predecibles. Ojo con el historial de esto: se
+            # bajó creyendo que el muestreo era la causa de que el modelo
+            # "describiera" la tool call en vez de emitirla, y no era eso
+            # (era el historial en prosa, ver _responder) -- por eso
+            # bajarla nunca terminó de arreglar aquello.
             options={"num_predict": _MAX_TOKENS_RESPUESTA, "temperature": 0.2},
         )
 
     def responder(self, texto_usuario: str) -> str:
-        respuesta_texto, entrada_historial = self._responder(texto_usuario)
-        self._historial.append({"role": "user", "content": texto_usuario})
-        self._historial.append(entrada_historial)
-        self._historial = self._historial[-_TURNOS_HISTORIAL * 2 :]
+        respuesta_texto, mensajes_turno = self._responder(texto_usuario)
+        self._historial.append([{"role": "user", "content": texto_usuario}, *mensajes_turno])
+        self._historial = self._historial[-_TURNOS_HISTORIAL:]
         return respuesta_texto
 
-    def _responder(self, texto_usuario: str) -> tuple[str, dict]:
-        """Devuelve (lo que se dice en voz, el mensaje que queda en el historial).
+    def _mensajes_historial(self) -> list[dict]:
+        return [mensaje for turno in self._historial for mensaje in turno]
 
-        Cuando hubo una herramienta de por medio, el mensaje de historial
-        va con role "system" y no "assistant": si quedara marcado como un
-        mensaje del asistente, el modelo lo lee como un ejemplo de "cómo
-        hablo yo" y termina copiando el formato tal cual en la respuesta
-        hablada real (pasó de verdad, con dos búsquedas seguidas en Maps).
-        Para una respuesta charlada sin herramienta, sí va como
-        "assistant" — ahí no hay riesgo, es lo que genuinamente dijiste.
+    def _responder(self, texto_usuario: str) -> tuple[str, list[dict]]:
+        """Devuelve (lo que se dice en voz, los mensajes que quedan en el historial).
+
+        El historial guarda el transcript nativo de tool calling tal cual
+        (un mensaje "assistant" con `tool_calls` y un mensaje "tool" con el
+        resultado), que es el formato con el que el modelo fue entrenado.
+
+        Antes acá se fabricaba una nota en prosa ("en el turno anterior
+        usaste la herramienta X y el resultado fue: Y") y eso era un bug
+        grave: al repetir un pedido, el modelo leía esa nota como "a esto
+        se contesta escribiendo" y respondía en prosa en vez de volver a
+        llamar la herramienta. Medido con qwen3:4b-instruct sobre
+        "siguiente canción" repetido: 0/12 tool calls con la nota en
+        prosa, 12/12 con el transcript nativo. No dependía de cómo
+        estuviera redactada la nota -- sacarle el texto del resultado
+        también daba 0/12 -- así que no se arregla puliendo la frase. Las
+        referencias de seguimiento ("poné metallica" -> "pausala"), que
+        eran el motivo de tener historial, siguen andando 12/12.
         """
         mensajes = [
             {"role": "system", "content": PROMPT_SISTEMA},
-            *self._historial,
+            *self._mensajes_historial(),
             {"role": "user", "content": texto_usuario},
         ]
         vistas: set = set()
         resultados: list = []
+        transcripcion: list[dict] = []
 
         for ronda in range(_MAX_RONDAS_HERRAMIENTAS):
             try:
                 respuesta = self._chat(mensajes, con_herramientas=True)
             except Exception as error:
                 texto = f"Se colgó el modelo local: {error}"
-                return texto, {"role": "assistant", "content": texto}
+                return texto, [{"role": "assistant", "content": texto}]
             mensaje = respuesta.message
             if not mensaje.tool_calls:
                 if ronda == 0:
                     # Nunca pidió ninguna herramienta: charla directa.
                     texto = _sin_pregunta_de_seguimiento((mensaje.content or "").strip())
-                    llamada = _herramienta_dicha_en_vez_de_llamada(texto)
-                    if llamada is not None:
-                        nombre, argumentos = llamada
-                        resultado = ejecutar(nombre, argumentos)
-                        print(
-                            f"  tool_call (fallback -- el modelo dijo la herramienta/acción "
-                            f"en vez de llamarla): {nombre}({argumentos}) -> {resultado!r}"
-                        )
-                        if es_error(resultado):
-                            return resultado, {"role": "assistant", "content": resultado}
-                        if nombre in _HERRAMIENTAS_SILENCIOSAS:
-                            entrada_historial = {
-                                "role": "system",
-                                "content": (
-                                    f"Nota interna, no es una respuesta hablada: en el turno "
-                                    f"anterior usaste la herramienta {nombre} y el resultado "
-                                    f"fue: {resultado}."
-                                ),
-                            }
-                            return "", entrada_historial
-                        return resultado, {"role": "assistant", "content": resultado}
-                    return texto, {"role": "assistant", "content": texto}
+                    return texto, [{"role": "assistant", "content": texto}]
                 break  # ya no pide más herramientas, pasa a resumir
 
-            mensajes.append(mensaje)
+            ejecutadas = []
             for llamada in mensaje.tool_calls:
                 clave = (llamada.function.name, tuple(sorted(llamada.function.arguments.items())))
                 if clave in vistas:
@@ -196,37 +158,38 @@ class Cerebro:
                 vistas.add(clave)
                 resultado = ejecutar(llamada.function.name, llamada.function.arguments)
                 print(f"  tool_call: {llamada.function.name}({llamada.function.arguments}) -> {resultado!r}")
-                resultados.append((llamada.function.name, llamada.function.arguments, resultado))
-                mensajes.append(
-                    {"role": "tool", "content": resultado, "name": llamada.function.name}
-                )
+                ejecutadas.append((llamada.function.name, dict(llamada.function.arguments), resultado))
+            if not ejecutadas:
+                break  # solo repeticiones de lo ya hecho, no hay nada nuevo
 
-        # Prosa simple, sin paréntesis ni llaves: un formato tipo código
-        # (aunque sea rol "system") se le pegó al modelo como estilo a
-        # imitar y terminó literalmente diciendo en voz alta algo como
-        # 'control_media({"accion": "siguiente"})' en vez de ejecutar la
-        # herramienta. Nada acá debe parecer sintaxis para copiar.
-        descripcion_acciones = ". ".join(
-            f"usaste la herramienta {nombre} y el resultado fue: {resultado}"
-            for nombre, _args, resultado in resultados
-        )
-        entrada_historial = {
-            "role": "system",
-            "content": (
-                f"Nota interna, no es una respuesta hablada: en el turno "
-                f"anterior {descripcion_acciones}."
-            ),
-        }
+            # Se reconstruye el mensaje del modelo con las llamadas que de
+            # verdad se ejecutaron (no las repetidas que se filtraron): así
+            # cada tool_call del transcript tiene su resultado, sin huecos.
+            mensaje_assistant = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": nombre, "arguments": argumentos}}
+                    for nombre, argumentos, _resultado in ejecutadas
+                ],
+            }
+            mensajes.append(mensaje_assistant)
+            transcripcion.append(mensaje_assistant)
+            for nombre, argumentos, resultado in ejecutadas:
+                mensaje_tool = {"role": "tool", "content": resultado, "name": nombre}
+                mensajes.append(mensaje_tool)
+                transcripcion.append(mensaje_tool)
+                resultados.append((nombre, argumentos, resultado))
 
         if resultados and all(
             nombre in _HERRAMIENTAS_SILENCIOSAS and not es_error(resultado)
             for nombre, _args, resultado in resultados
         ):
-            return "", entrada_historial
+            return "", transcripcion
 
         try:
             respuesta_final = self._chat(mensajes, con_herramientas=False)
         except Exception as error:
-            return f"Se colgó el modelo local: {error}", entrada_historial
+            return f"Se colgó el modelo local: {error}", transcripcion
         texto = _sin_pregunta_de_seguimiento((respuesta_final.message.content or "").strip())
-        return texto, entrada_historial
+        return texto, [*transcripcion, {"role": "assistant", "content": texto}]
