@@ -34,7 +34,7 @@ proyecto, esto queda huérfano si no se borra a mano:
 | Qué | Dónde | Para qué | Cómo revertir |
 |---|---|---|---|
 | App "Tero" en Spotify | https://developer.spotify.com/dashboard (cuenta del usuario) | Client ID para la Web API (búsqueda + reproducción real, ver `herramientas/_spotify_auth.py`). Client ID guardado en `config.toml` (no es secreto, PKCE no lo necesita) | Borrar la app desde el dashboard |
-| Token OAuth de Spotify | `~/.config/tero/spotify_token.json` (permisos 600) | Refresh token de la sesión logueada, para no repetir el login cada vez | `rm ~/.config/tero/spotify_token.json` (+ opcionalmente revocar el acceso de la app desde la cuenta de Spotify) |
+| Token OAuth de Spotify | `~/.config/tero/spotify_token.json` (permisos 600) | Refresh token de la sesión logueada (scopes: `user-modify-playback-state`, `user-read-playback-state`, `user-library-read` -- este último para `reproducir_musica_aleatoria`, que elige de "Tus me gusta") | `rm ~/.config/tero/spotify_token.json` (+ opcionalmente revocar el acceso de la app desde la cuenta de Spotify) |
 | Bot de Telegram "tero_asistente_bot" | Creado con @BotFather en la cuenta de Telegram del usuario | `mandar_al_celular`: mandar texto/links al celular (Samsung SM-A556E) del usuario, gratis, sin límites de uso personal | Borrar el bot hablándole a @BotFather (`/deletebot`), y `rm ~/.config/tero/telegram.json` |
 
 ## Evaluado y descartado (para no repetir la discusión)

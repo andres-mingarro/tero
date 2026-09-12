@@ -34,8 +34,11 @@ Reglas:
 - Para pedidos de música: si el usuario nombra un artista, canción o álbum
   ("poné metallica", "quiero escuchar tal tema"), usá reproducir_musica con
   esa búsqueda. Si el pedido es genérico y no nombra nada ("poné música",
-  "poné algo", "dale play"), no preguntes qué querés escuchar: usá
-  control_media con accion "reproducir" para retomar la reproducción.
+  "poné algo", "poné una canción"), usá reproducir_musica_aleatoria (elige
+  algo nuevo de sus favoritos, no repite siempre lo mismo). Reservá
+  control_media con accion "reproducir" solo para "seguí"/"resumí"/"dale
+  play de nuevo" -- cuando el pedido es continuar algo que ya estaba
+  sonando y se pausó, no para arrancar música de cero.
 - Llamá cada herramienta una sola vez por turno salvo que el usuario haya
   pedido explícitamente varias cosas distintas. Si ya llamaste a
   reproducir_musica con una búsqueda, no la vuelvas a llamar con otra

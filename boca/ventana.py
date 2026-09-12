@@ -21,9 +21,8 @@ _TITULO_VENTANA = "tero-boca"
 
 _RUTA_HTML = Path(__file__).parent / "index.html"
 _RUTA_SIRIWAVE = Path(__file__).parent / "siriwave.umd.js"
-_ANCHO, _ALTO = 260, 100
+_ANCHO, _ALTO = 260, 74
 _MARGEN = 20
-
 
 def _html_con_js_incrustado() -> str:
     # Con url= (sirviendo el archivo vía el servidor Bottle interno de
@@ -93,7 +92,11 @@ def main() -> None:
         x=x,
         y=y,
         frameless=True,
-        easy_drag=False,
+        # Mutter no deja que la app se reposicione sola (ni el x/y de
+        # creación ni wmctrl -e sirven, probado con _MARGEN=400 sin
+        # ningún cambio visual). easy_drag=True es la única forma real de
+        # moverla: clickeás y arrastrás en cualquier parte de la ventana.
+        easy_drag=True,
         focus=False,
         on_top=False,
         transparent=True,

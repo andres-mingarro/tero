@@ -8,6 +8,7 @@ Requiere Spotify Premium: el endpoint de reproducción de la Web API
 devuelve 403 en cuentas free.
 """
 
+import random
 import subprocess
 import time
 from typing import Literal
@@ -47,24 +48,83 @@ def _dispositivo_activo() -> str | None:
 
 def estado_reproduccion() -> dict | None:
     """Qué suena en Spotify ahora (texto, progreso y duración en ms), o
-    None si no hay nada. No es una herramienta del modelo -- la usa la
-    boca para mostrar debajo de la onda qué está sonando y el progreso."""
+    None si no hay nada cargado. Si está en pausa, sigue devolviendo el
+    dict (con reproduciendo=False) en vez de None -- la boca lo muestra
+    distinto (en rojo, sin avanzar el progreso) en vez de ocultar todo
+    como si no hubiera nada. No es una herramienta del modelo -- la usa
+    la boca para mostrar debajo de la onda qué está sonando."""
     try:
         respuesta = httpx.get(f"{_API}/me/player/currently-playing", headers=_headers(), timeout=5.0)
         if respuesta.status_code != 200 or not respuesta.content:
             return None
         datos = respuesta.json()
         item = datos.get("item")
-        if not datos.get("is_playing") or not item:
+        if not item:
             return None
         artista = item["artists"][0]["name"] if item.get("artists") else "?"
         return {
             "texto": f"{item['name']} · {artista}",
             "progreso_ms": datos.get("progress_ms") or 0,
             "duracion_ms": item.get("duration_ms") or 0,
+            "reproduciendo": bool(datos.get("is_playing")),
         }
     except Exception:
         return None
+
+
+def _asegurar_dispositivo() -> str | None:
+    """Dispositivo activo de Spotify Connect, abriendo la app y
+    reintentando con backoff si no hay ninguno visible todavía."""
+    device_id = _dispositivo_activo()
+    if device_id is None:
+        subprocess.run(["xdg-open", "spotify:"], check=False)
+        for espera in (2, 2, 3, 3):
+            time.sleep(espera)
+            device_id = _dispositivo_activo()
+            if device_id is not None:
+                break
+    return device_id
+
+
+def _reproducir_uris(uris: list[str], device_id: str) -> None:
+    # Una lista, no una sola uri: con una sola canción sin cola detrás,
+    # "siguiente" no tiene a dónde avanzar (probado en vivo: control_media
+    # con accion "siguiente" no hacía nada porque no había próximo tema).
+    respuesta = httpx.put(
+        f"{_API}/me/player/play",
+        params={"device_id": device_id},
+        headers=_headers(),
+        json={"uris": uris},
+        timeout=10.0,
+    )
+    respuesta.raise_for_status()
+
+
+def _favoritos_aleatorios(cantidad: int) -> list[dict]:
+    """Hasta `cantidad` tracks de "Tus me gusta", de una ventana al azar,
+    ya mezclados. Lista vacía si no hay favoritos o falla la lectura."""
+    try:
+        respuesta = httpx.get(
+            f"{_API}/me/tracks", params={"limit": 1}, headers=_headers(), timeout=10.0
+        )
+        respuesta.raise_for_status()
+        total = respuesta.json().get("total", 0)
+        if total == 0:
+            return []
+        tamano = min(cantidad, total)
+        offset = random.randint(0, max(0, total - tamano))
+        respuesta = httpx.get(
+            f"{_API}/me/tracks",
+            params={"limit": tamano, "offset": offset},
+            headers=_headers(),
+            timeout=10.0,
+        )
+        respuesta.raise_for_status()
+        tracks = [item["track"] for item in respuesta.json()["items"]]
+        random.shuffle(tracks)
+        return tracks
+    except Exception:
+        return []
 
 
 @herramienta
@@ -77,32 +137,40 @@ def reproducir_musica(busqueda: str) -> str:
     if track is None:
         return f"La herramienta 'reproducir_musica' falló: no encontré ninguna canción para {busqueda!r} en Spotify."
 
-    device_id = _dispositivo_activo()
-    if device_id is None:
-        # Sin ningún dispositivo de Spotify Connect visible: probablemente
-        # la app no está abierta (o recién se abrió y todavía no terminó
-        # de registrarse como dispositivo — eso tarda unos segundos, más la
-        # primera vez). Se abre y se reintenta con backoff en vez de una
-        # sola espera fija.
-        subprocess.run(["xdg-open", "spotify:"], check=False)
-        for espera in (2, 2, 3, 3):
-            time.sleep(espera)
-            device_id = _dispositivo_activo()
-            if device_id is not None:
-                break
+    device_id = _asegurar_dispositivo()
     if device_id is None:
         return "La herramienta 'reproducir_musica' falló: no hay ningún dispositivo de Spotify activo, ni abriendo la app."
 
-    respuesta = httpx.put(
-        f"{_API}/me/player/play",
-        params={"device_id": device_id},
-        headers=_headers(),
-        json={"uris": [track["uri"]]},
-        timeout=10.0,
-    )
-    respuesta.raise_for_status()
+    # Después de esta canción, se encolan algunos favoritos al azar --
+    # sin esto, "siguiente" no tenía a dónde avanzar (una sola canción
+    # suelta no es una cola real).
+    cola = [track["uri"]] + [
+        t["uri"] for t in _favoritos_aleatorios(10) if t["uri"] != track["uri"]
+    ]
+    _reproducir_uris(cola, device_id)
     artista = track["artists"][0]["name"] if track["artists"] else "?"
     return f"Reproduciendo {track['name']!r} de {artista}."
+
+
+@herramienta
+def reproducir_musica_aleatoria() -> str:
+    """Elige varias canciones al azar de "Tus me gusta" (favoritos) del
+    usuario en Spotify y las pone en cola, empezando por una de ellas.
+    Usar para pedidos genéricos de música que NO nombran artista/canción/
+    álbum (ej. "poné música", "poné algo", "poné alguna canción") -- no
+    repite siempre lo último que sonó, y "siguiente" tiene a dónde ir."""
+    tracks = _favoritos_aleatorios(15)
+    if not tracks:
+        return "La herramienta 'reproducir_musica_aleatoria' falló: no tenés canciones en 'Tus me gusta' en Spotify."
+
+    device_id = _asegurar_dispositivo()
+    if device_id is None:
+        return "La herramienta 'reproducir_musica_aleatoria' falló: no hay ningún dispositivo de Spotify activo, ni abriendo la app."
+
+    _reproducir_uris([t["uri"] for t in tracks], device_id)
+    primero = tracks[0]
+    artista = primero["artists"][0]["name"] if primero["artists"] else "?"
+    return f"Reproduciendo {primero['name']!r} de {artista} (de tus favoritos)."
 
 
 _COMANDOS_PLAYERCTL = {

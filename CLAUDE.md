@@ -4,7 +4,10 @@ Asistente de voz de escritorio, activado por tecla. Corre como daemon en
 segundo plano; el micrófono se abre solo mientras se mantiene apretada una
 tecla dedicada.
 
-Desarrollo actual en **Windows**. Migración a **Linux** planificada.
+Desarrollo en **Linux** (GNOME/Wayland) — el proyecto arrancó directo acá,
+no hubo migración desde Windows pese a que secciones viejas de este
+documento lo daban por planificado (ver `plataforma/linux.py`, ya escrito
+y en uso; no existe `plataforma/windows.py`).
 Idioma del asistente y del código: **español**.
 
 ---
@@ -86,19 +89,24 @@ necesidad.
 
 ## Stack
 
-| Pieza | Elección | Windows | Linux |
+| Pieza | Elección | Windows (nunca implementado) | Linux (real) |
 |---|---|---|---|
 | Audio in/out | `sounddevice` | igual | igual |
-| STT | `faster-whisper`, modelo `small`, es | igual | igual |
+| STT | `faster-whisper`, modelo `large-v3`, es | igual | igual |
 | Modelo local | Qwen3 4B Instruct vía Ollama | igual | igual |
 | TTS | Piper (ONNX, voz es) | igual | igual |
 | Tecla global | — | `pynput` | `evdev` |
 | Ventana activa | — | `pygetwindow` / Win32 | `wmctrl` / D-Bus |
-| Media | — | teclas multimedia | MPRIS (`playerctl`) |
-| Overlay | WebView + WebSocket | igual | + `gtk4-layer-shell` |
-| Servicio | — | Task Scheduler | systemd user |
+| Media | — | teclas multimedia | MPRIS (`playerctl`) + Web API de Spotify |
+| Overlay | pywebview (Qt) + WebSocket | — | `QT_QPA_PLATFORM=xcb` (sin `gtk4-layer-shell`, no instalado) |
+| Servicio | — | Task Scheduler | systemd user (no configurado todavía) |
 
-Las primeras cuatro filas son idénticas en ambos sistemas: ~80% del código.
+`modelo small` se probó primero pero alucinaba nombres propios (Trelew,
+artistas); se subió a `large-v3` a pedido explícito del usuario
+("prefiero un modelo un poco más lento pero que funcione").
+
+La fila de Windows es la tabla de diseño original — nunca se llegó a
+escribir `plataforma/windows.py`, el desarrollo fue siempre en Linux.
 
 ---
 
@@ -107,12 +115,14 @@ Las primeras cuatro filas son idénticas en ambos sistemas: ~80% del código.
 ```
 tero/
   main.py            bucle principal
-  plataforma/        base.py, windows.py, linux.py
+  plataforma/        base.py, linux.py (no hay windows.py, ver más arriba)
   voz/               stt.py, tts.py
   cerebro/           router.py, prompt.py
-  herramientas/      musica.py, clima.py, web.py,
-                     terminal.py, codex.py
-  boca/              server.py, index.html
+  herramientas/      musica.py, clima.py, web.py, mapas.py, celular.py,
+                     terminal.py, tiempo.py, volumen.py,
+                     _spotify_auth.py, _telegram.py, codex.py (fase 4)
+  boca/              server.py, ventana.py, audio_sistema.py, index.html,
+                     siriwave.umd.js (vendorizada)
   config.toml
 ```
 
@@ -142,10 +152,10 @@ el esquema JSON que consume Ollama. Agregar una capacidad = un archivo de
 
 ```python
 herramientas = [
-  reproducir_musica, control_media, consultar_clima,
-  abrir_url, buscar_en_sitio, ajustar_volumen,
-  leer_terminal, consultar_hora, capturar_pantalla,
-  delegar_a_codex          # salida de escape
+  reproducir_musica, reproducir_musica_aleatoria, control_media,
+  consultar_clima, abrir_url, buscar_en_sitio, ajustar_volumen,
+  leer_terminal, consultar_hora, calcular_viaje, mandar_al_celular,
+  capturar_pantalla, delegar_a_codex          # salida de escape
 ]
 ```
 
@@ -153,26 +163,40 @@ Catálogo completo ✅ salvo `capturar_pantalla` (fase 3, atado a
 `Plataforma.capturar_pantalla`) y `delegar_a_codex` (fase 4).
 `consultar_hora` no estaba en el plan original: se agregó porque el modelo
 local no tiene noción de reloj y "qué hora es"/"qué día es hoy" lo
-necesitan.
+necesitan. `calcular_viaje` y `mandar_al_celular` tampoco estaban en el
+plan original, surgieron de pedidos concretos del usuario (distancia a un
+lugar + mandarle la dirección al celular).
 
 Notas por herramienta:
 
 - **Clima**: Open-Meteo. Sin clave, sin registro. Leer forecast horario y
   dejar que el modelo lo resuma en lenguaje natural.
-- **Media**: `reproducir_musica` abre la búsqueda en
-  `open.spotify.com/search/` (no el URI `spotify:search:`: la URL web
-  funciona con o sin la app instalada). `control_media` usa `playerctl`
-  (MPRIS) para play/pausa/siguiente/anterior — requiere tenerlo instalado,
-  no viene por defecto.
+- **Música**: reproducción real vía la Web API de Spotify (OAuth PKCE, ver
+  `herramientas/_spotify_auth.py`), no solo abrir una búsqueda — necesario
+  para que "poné X" realmente empiece a sonar X, y para que "siguiente"
+  tenga una cola de verdad detrás. `reproducir_musica` busca y encola el
+  resultado más varios favoritos al azar detrás; `reproducir_musica_
+  aleatoria` es para pedidos genéricos ("poné música") y elige de "Tus me
+  gusta" (scope `user-library-read`) en vez de repetir siempre lo mismo.
+  `control_media` usa `playerctl` (MPRIS) para play/pausa/siguiente/
+  anterior sobre lo que ya esté sonando (Spotify, navegador, etc.) —
+  requiere tenerlo instalado, no viene por defecto. Requiere Spotify
+  Premium (la Web API no deja reproducir en cuentas free).
+- **Mapas**: `calcular_viaje` geocodifica con Open-Meteo (misma API que el
+  clima, sin clave) y calcula distancia/tiempo real con el servidor demo
+  de OSRM (gratis, sin clave), devolviendo también la URL real de Google
+  Maps para la ruta.
+- **Celular**: `mandar_al_celular` manda texto/links al celular del
+  usuario vía un bot de Telegram personal (`herramientas/_telegram.py`) —
+  se eligió sobre GSConnect/Google Chat por simplicidad de setup.
 - **Web / MercadoLibre**: **no** hacer un agente con navegador. El modelo
   arma la URL y se abre. Es instantáneo y no se rompe:
   `listado.mercadolibre.com.ar/zapatillas-adidas-talle-44`
   El agente con Playwright se reserva solo para lo que no se puede
   parametrizar por URL. `buscar_en_sitio` generaliza esto a mercadolibre/
-  google/youtube/amazon.
+  google/youtube/amazon/maps.
 - **Terminal**: en Linux, `tmux capture-pane` si la sesión corre dentro de
-  tmux; si no, portapapeles (`wl-paste`/`xclip`) — mismo mecanismo feo
-  pero infalible que se iba a usar para Windows. En este entorno de
+  tmux; si no, portapapeles (`wl-paste`/`xclip`). En este entorno de
   desarrollo no hay tmux instalado, así que hoy el camino real es
   portapapeles.
 
@@ -195,21 +219,44 @@ timeout generoso, salida capturada. Tres cuidados:
 
 ---
 
-## La boca (overlay)
+## La boca (overlay) ✅
 
-Es render, no IA. No hace falta sincronía labial ni fonemas.
+Es render, no IA. No hace falta sincronía labial ni fonemas. Implementada
+con `pywebview` (backend Qt/QtWebEngine — no hay PyGObject en este
+entorno, así que GTK no está disponible) renderizando `boca/index.html`
+(SiriWave vendorizada), y `boca/server.py` mandándole niveles/estado por
+WebSocket local (`ws://127.0.0.1:8765`).
 
-- Señal: RMS del audio del TTS (volumen → apertura). Opcionalmente FFT de
-  8–16 bandas para que "articule".
+- Señal: RMS real, no solo del TTS. Tres fuentes según el estado:
+  el audio del TTS mientras habla, el **micrófono en vivo** mientras
+  escucha (vía el callback de `sounddevice` en `Grabador`, con auto-gain
+  contra el pico reciente de volumen — un multiplicador fijo no sirve
+  porque el rms de un mic vive en una escala mucho más baja e
+  impredecible que la del audio de TTS), y el audio de salida del sistema
+  (PipeWire, `boca/audio_sistema.py`) cuando no pasa nada más.
 - **Suavizado asimétrico**: ataque rápido, decaimiento lento. Esto es lo
   que separa "se ve pro" de "se ve amateur". El RMS crudo tiembla.
-- Ventana: sin bordes, siempre encima, **sin foco**, fondo transparente.
-  En Linux esto requiere `gtk4-layer-shell`; sin eso el overlay roba el
-  foco del editor cada vez que habla.
-- Implementación: WebView renderizando un canvas HTML; el daemon manda
-  niveles por WebSocket. Permite iterar el diseño recargando la página.
-- Tres estados visuales distintos: **escuchando** (tecla apretada),
-  **pensando** (modelo trabajando), **hablando**. Más un idle que respira.
+- Ventana: sin bordes, sin foco. "Siempre encima" no es persistente bajo
+  Mutter sin `gtk4-layer-shell` (no instalado): se fuerza
+  `QT_QPA_PLATFORM=xcb` para que la ventana sea una ventana X11/XWayland
+  real que `wmctrl` puede manipular, y se reintenta "traer al frente" en
+  bucle mientras habla. Reposicionar por código (x/y de creación,
+  `wmctrl -e`) no tiene ningún efecto en este entorno (confirmado); la
+  única forma real de moverla es arrastrarla (`easy_drag=True`), y no hay
+  forma de persistir esa posición entre reinicios del proceso.
+- Colores por estado: la onda usa el estilo `"ios9"` de SiriWave, que
+  ignora el color del constructor y trae sus curvas hardcodeadas en
+  azul/rojo/verde — hay que recolorear las curvas a mano en cada cambio
+  de estado (ver `aplicarEstado()` en `index.html`) para que el color
+  realmente cambie, no alcanza con el `drop-shadow` de afuera.
+- Cuatro estados visuales: **escuchando** (blanco, reactivo al mic),
+  **pensando** (violeta claro), **hablando** (multicolor original de la
+  librería — a pedido explícito del usuario, es el único estado que no
+  se fuerza a un color plano), **música** (turquesa, reactivo al audio
+  del sistema). Más un idle que respira.
+- Debajo de la onda, nombre de la canción + barra de progreso de lo que
+  suena en Spotify (polling cada ~5s, interpolado en cada frame). Se
+  oculta sola si queda pausada 30s seguidos.
 
 **El daemon tiene que funcionar sin la boca.** La ventana es un cliente
 opcional del stream de niveles.
@@ -222,7 +269,7 @@ Del beep a la primera sílaba, camino local:
 
 | Etapa | Tiempo |
 |---|---|
-| STT (Whisper small, 5 s de audio) | 0,3–0,8 s |
+| STT (objetivo con Whisper `small`; se subió a `large-v3` por precisión, ver Stack) | 0,3–0,8 s |
 | Modelo local (tool call) | 0,3–0,6 s |
 | Ejecución de herramienta | ~0 |
 | TTS primer sonido (streaming) | 0,2 s |
@@ -249,32 +296,29 @@ Camino Codex: 10–30 s. Por eso hay que avisar por voz.
 
 1. **Esqueleto** ✅ — tecla, grabación, Whisper, TTS. Commit `630b3a4`.
 2. **Cerebro** ✅ — Ollama + Qwen3 (`qwen3:4b-instruct`) con tool calling
-   de punta a punta. Catálogo completo: `consultar_clima` (Open-Meteo),
-   `reproducir_musica` y `control_media` (Spotify web + playerctl),
-   `abrir_url` y `buscar_en_sitio` (mercadolibre/google/youtube/amazon),
-   `ajustar_volumen` (wpctl/PipeWire), `leer_terminal` (tmux o
-   portapapeles), `consultar_hora`. Commit `5eef997` (clima/volumen/url) +
-   pendiente de commitear (música/terminal/hora, ver `git status`).
+   de punta a punta, multi-ronda (hasta 4 llamadas por turno para pedidos
+   compuestos), memoria corta (últimos 2 intercambios), y varias redes de
+   seguridad determinísticas en código contra fallas de sampling del
+   modelo chico (ver `cerebro/router.py`: filtro de preguntas de
+   seguimiento colgadas, fallback cuando el modelo dice una herramienta
+   en vez de invocarla, `temperature: 0.2`). Catálogo completo (ver
+   sección de Herramientas más arriba). Commits `5eef997` y `bad3ed1`.
 3. **Contexto** — ventana activa, portapapeles, captura bajo demanda.
    No arrancado.
 4. **Codex** — la rama pesada. No arrancado.
-5. **Boca** — independiente, vía WebSocket. No arrancado.
-6. **Linux** — escribir `plataforma/linux.py`. Ya existe y funciona (se
-   adelantó: desarrollo pasó a Linux desde el arranque del proyecto, ver
-   contexto de por qué en la sección de decisiones de plataforma más
-   abajo si se agrega, o preguntar — no hay `plataforma/windows.py`).
+5. **Boca** ✅ — overlay con WebSocket, ver sección dedicada más arriba.
+6. **Linux** ✅ — `plataforma/linux.py` ya existe y funciona (desarrollo
+   pasó a Linux desde el arranque del proyecto; no hay
+   `plataforma/windows.py`).
 
-Estado actual: **fase 2 con el catálogo de herramientas cerrado**
-(salvo `capturar_pantalla`, que espera a fase 3, y `delegar_a_codex`, fase
-4). Pendiente para retomar:
-- Commitear `herramientas/musica.py`, `herramientas/terminal.py`,
-  `herramientas/tiempo.py` y los cambios en `herramientas/web.py` /
-  `cerebro/router.py`.
-- `control_media` necesita `playerctl` instalado (no está en este
-  entorno); probarlo una vez instalado.
+Estado actual: **fases 1, 2, 5 y 6 completas y commiteadas.** Pendiente
+para retomar:
+- Fase 3 (Contexto) es el próximo paso lógico del plan original, todavía
+  sin arrancar.
+- `capturar_pantalla` depende de fase 3 (`Plataforma.capturar_pantalla`).
 - No hay `tmux` instalado en este entorno, así que `leer_terminal` cae
   siempre al portapapeles — no probado el camino de tmux.
-- Decidir si fase 3 (Contexto) es el próximo paso.
+- `delegar_a_codex` (fase 4) sigue sin arrancar.
 
 ---
 

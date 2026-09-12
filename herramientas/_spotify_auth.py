@@ -28,7 +28,7 @@ import httpx
 _AUTH_URL = "https://accounts.spotify.com/authorize"
 _TOKEN_URL = "https://accounts.spotify.com/api/token"
 _REDIRECT_URI = "http://127.0.0.1:8942/callback"
-_SCOPE = "user-modify-playback-state user-read-playback-state"
+_SCOPE = "user-modify-playback-state user-read-playback-state user-library-read"
 _RUTA_TOKEN = Path.home() / ".config" / "tero" / "spotify_token.json"
 
 
@@ -76,6 +76,10 @@ def _login(client_id: str) -> dict:
         "code_challenge_method": "S256",
         "code_challenge": _code_challenge(verifier),
         "scope": _SCOPE,
+        # Sin esto, si el usuario ya había autorizado la app antes,
+        # Spotify no vuelve a mostrar la pantalla de permisos y el login
+        # queda con el scope viejo aunque acá se pida uno nuevo.
+        "show_dialog": "true",
     }
     webbrowser.open(f"{_AUTH_URL}?{urllib.parse.urlencode(params)}")
     codigo = _esperar_callback()

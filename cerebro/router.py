@@ -13,6 +13,8 @@ Dos salvaguardas duras, no opcionales, sobre cada llamada al modelo:
   tokens, algo se cuelgue del lado del servidor.
 """
 
+import re
+
 from ollama import Client
 
 import herramientas.celular  # noqa: F401
@@ -24,7 +26,7 @@ import herramientas.tiempo  # noqa: F401
 import herramientas.volumen  # noqa: F401
 import herramientas.web  # noqa: F401
 from cerebro.prompt import PROMPT_SISTEMA
-from herramientas import catalogo, ejecutar, es_error
+from herramientas import catalogo, ejecutar, es_error, sin_argumentos_obligatorios
 
 _MAX_TOKENS_RESPUESTA = 200
 _TIMEOUT_S = 10.0
@@ -41,7 +43,7 @@ _MAX_RONDAS_HERRAMIENTAS = 4
 # empieza a sonar (o el corte de audio) ya es la respuesta. Si alguna
 # falla, se rompe el silencio igual (ver más abajo) para avisar que algo
 # pasó.
-_HERRAMIENTAS_SILENCIOSAS = {"reproducir_musica", "control_media"}
+_HERRAMIENTAS_SILENCIOSAS = {"reproducir_musica", "reproducir_musica_aleatoria", "control_media"}
 
 # Cuántos intercambios (usuario+asistente) previos se le pasan al modelo.
 # Sin esto cada frase arranca de cero: "poné metallica" -> "pausalo" no
@@ -50,6 +52,57 @@ _HERRAMIENTAS_SILENCIOSAS = {"reproducir_musica", "control_media"}
 # usuario tiene que decir algo con sentido propio, no un "sí"/"no" que
 # dependa de que el modelo recuerde qué preguntó — acá al menos si recuerda).
 _TURNOS_HISTORIAL = 2
+
+
+_ACCIONES_MEDIA = {"reproducir", "pausar", "siguiente", "anterior"}
+
+
+def _herramienta_dicha_en_vez_de_llamada(texto: str) -> tuple[str, dict] | None:
+    """Detecta cuando el modelo dijo en voz el nombre de una acción o de
+    una herramienta en vez de invocarla -- visto en vivo tres veces, cada
+    vez con una firma de texto distinta ("cambiá de canción" -> dijo
+    'reproducir siguiente'; "poné play" -> dijo 'reproducir'; "ponme
+    play" -> dijo literalmente 'reproducir_musica_aleatoria'), pese a que
+    la temperatura ya está baja (0.2) y el prompt ya dice que hay que usar
+    la herramienta. No es una falla que se arregle bajando más la
+    temperatura (ya casi no hay margen) ni con otra frase de prompt (esa
+    regla ya existe y falla igual) -- es la misma clase de error cada vez
+    y tiene una firma exacta y detectable en código: la respuesta entera
+    es, literal, el nombre de una acción o de una herramienta real. Se
+    ejecuta la herramienta correspondiente en vez de tratarlo como charla.
+
+    Devuelve (nombre_herramienta, argumentos) o None si no aplica. Solo
+    contempla herramientas sin argumentos obligatorios (más el caso
+    puntual de control_media, cuyo único argumento es la propia acción
+    que el modelo dijo).
+    """
+    limpio = texto.strip().lower().rstrip(".!?")
+    if limpio in _ACCIONES_MEDIA:
+        return "control_media", {"accion": limpio}
+    palabras = limpio.split()
+    if len(palabras) == 2 and palabras[0] == "reproducir" and palabras[1] in _ACCIONES_MEDIA:
+        return "control_media", {"accion": palabras[1]}
+    if limpio in sin_argumentos_obligatorios():
+        return limpio, {}
+    return None
+
+
+def _sin_pregunta_de_seguimiento(texto: str) -> str:
+    """Corta cualquier pregunta colgada al final de una respuesta hablada.
+
+    El prompt prohíbe preguntar, pero el modelo a veces lo hace igual
+    (visto en vivo: 'de nada, ¿qué tal si ahora ponemos música?'). El
+    problema no es solo que suene raro: esa pregunta queda en el
+    historial, y el turno siguiente -- aunque no tenga nada que ver -- se
+    interpreta como si fuera la respuesta a ella (visto en vivo: después
+    de esa pregunta, "dos más dos" disparó reproducir_musica_aleatoria en
+    vez de contestar la cuenta). Es un filtro determinístico, no otra
+    regla más para que el modelo decida cumplir o no.
+    """
+    oraciones = re.split(r"(?<=[.!?])\s+", texto.strip())
+    while oraciones and oraciones[-1].rstrip().endswith("?"):
+        oraciones.pop()
+    return " ".join(oraciones).strip() or texto.strip()
 
 
 class Cerebro:
@@ -63,7 +116,13 @@ class Cerebro:
             model=self._modelo,
             messages=mensajes,
             tools=catalogo() if con_herramientas else None,
-            options={"num_predict": _MAX_TOKENS_RESPUESTA},
+            # temperature baja: el muestreo por defecto a veces "describe"
+            # la tool call en palabras en vez de emitirla de verdad (visto
+            # en vivo con "siguiente tema" -> dijo "reproducir siguiente"),
+            # sin ningún patrón fijo -- es aleatoriedad del muestreo, no un
+            # bug de código. Menos temperatura = tool calling más confiable,
+            # a costa de un poco menos de variedad en cómo habla.
+            options={"num_predict": _MAX_TOKENS_RESPUESTA, "temperature": 0.2},
         )
 
     def responder(self, texto_usuario: str) -> str:
@@ -102,7 +161,28 @@ class Cerebro:
             if not mensaje.tool_calls:
                 if ronda == 0:
                     # Nunca pidió ninguna herramienta: charla directa.
-                    texto = (mensaje.content or "").strip()
+                    texto = _sin_pregunta_de_seguimiento((mensaje.content or "").strip())
+                    llamada = _herramienta_dicha_en_vez_de_llamada(texto)
+                    if llamada is not None:
+                        nombre, argumentos = llamada
+                        resultado = ejecutar(nombre, argumentos)
+                        print(
+                            f"  tool_call (fallback -- el modelo dijo la herramienta/acción "
+                            f"en vez de llamarla): {nombre}({argumentos}) -> {resultado!r}"
+                        )
+                        if es_error(resultado):
+                            return resultado, {"role": "assistant", "content": resultado}
+                        if nombre in _HERRAMIENTAS_SILENCIOSAS:
+                            entrada_historial = {
+                                "role": "system",
+                                "content": (
+                                    f"Nota interna, no es una respuesta hablada: en el turno "
+                                    f"anterior usaste la herramienta {nombre} y el resultado "
+                                    f"fue: {resultado}."
+                                ),
+                            }
+                            return "", entrada_historial
+                        return resultado, {"role": "assistant", "content": resultado}
                     return texto, {"role": "assistant", "content": texto}
                 break  # ya no pide más herramientas, pasa a resumir
 
@@ -148,5 +228,5 @@ class Cerebro:
             respuesta_final = self._chat(mensajes, con_herramientas=False)
         except Exception as error:
             return f"Se colgó el modelo local: {error}", entrada_historial
-        texto = (respuesta_final.message.content or "").strip()
+        texto = _sin_pregunta_de_seguimiento((respuesta_final.message.content or "").strip())
         return texto, entrada_historial

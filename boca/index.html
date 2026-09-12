@@ -14,7 +14,8 @@
   #boca-wrapper {
     position: relative;
     width: 260px;
-        height: 69px;
+    height: 74px;
+    overflow: hidden;
   }
 
   #onda-wrapper {
@@ -23,14 +24,14 @@
 
   #onda {
     width: 260px;
-    height: 50px;
+    height: 74px;
     position: relative;
     z-index: 1;
   }
   #info {
     position: absolute;
     left: 0;
-    bottom: 32px;
+    bottom: 23px;
     right: 0;
     height: 12px;
     box-sizing: border-box;
@@ -58,8 +59,13 @@
     position: absolute;
     left: 10px;
     right: 10px;
-    top: 22px;
-    z-index: 0;
+    bottom: 39px;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+  }
+  #fila-progreso.visible {
+    opacity: 1;
   }
   #fila-progreso span {
     color: rgba(255, 255, 255, 0.55);
@@ -81,7 +87,7 @@
   }
   #barra {
     flex: 1;
-    height: 2px;
+    height: 1px;
     position: relative;
     background: transparent;
     overflow: visible;
@@ -96,6 +102,10 @@
   #barra-relleno {
     height: 100%;
     width: 0%;
+    /* Sin esto, al cambiar de canción el ancho salta de golpe (de donde
+       había quedado la anterior a ~0% de la nueva) y el puntito de luz
+       "se apaga y prende" de un frame al otro en vez de deslizarse. */
+    transition: width 0.25s ease;
     position: relative;
     {# clip-path: polygon(0 50%, 3px 0, calc(100% - 3px) 0, 100% 50%, calc(100% - 3px) 100%, 3px 100%); #}
     background: linear-gradient(90deg,
@@ -104,13 +114,33 @@
     );
     background-size: 300% 100%;
     filter: drop-shadow(0 0 3px var(--glow)) drop-shadow(0 0 8px var(--glow));
-    background: #fff;
+    background: #ffffffa6;
     border-radius: 100%;
     opacity: 1;
     animation:
       barra-color-flow 4s linear infinite,
       barra-glow-color 4s linear infinite,
       barra-respira 1.8s ease-in-out infinite;
+  }
+  /* En pausa: se congela el color/brillo animado de la barra, y el
+     puntito de luz late en rojo con el centro blanco -- como un
+     "corazón" pulsando, para que se note de un vistazo que está pausado. */
+  #barra-relleno.pausado {
+    animation-play-state: paused;
+    filter: drop-shadow(0 0 3px #ff4d4d) drop-shadow(0 0 8px #ff4d4d);
+  }
+  #barra-relleno.pausado::after {
+    animation: punto-pulso 2.2s ease-in-out infinite;
+  }
+  @keyframes punto-pulso {
+    0%, 100% {
+      background: #fff;
+      box-shadow: 0 0 2px 1px #fff, 0 0 6px 2px #22c55e;
+    }
+    50% {
+      background: #22c55e;
+      box-shadow: 0 0 3px 1px #22c55e, 0 0 9px 3px #22c55e;
+    }
   }
   /* Puntito de luz en la punta del progreso, un poco más fuerte que el
      resto de la barra pero sin llamar demasiado la atención. */
@@ -120,7 +150,7 @@
     right: -1px;
     top: 50%;
     width: 4px;
-    height: 4px;
+    height: 2px;
     transform: translateY(-50%);
     border-radius: 50%;
     background: #fff;
@@ -171,14 +201,13 @@
 
 const COLORES = {
   idle:        "#4a4458",
-  escuchando:  "#7c5cff",
+  escuchando:  "#ffffff",
   pensando:    "#c77dff",
   hablando:    "#7c5cff",
   musica:      "#5cffd4",
 };
 
 const AMPLITUD_IDLE = 0.15;
-const AMPLITUD_ESCUCHANDO = 0.35;
 const AMPLITUD_PENSANDO = 0.45;
 
 const wave = new SiriWave({
@@ -200,9 +229,10 @@ const DECAIMIENTO = 0.25; // más rápido que antes (0.08): con eso la onda
                           // palabras, se veía desacoplada del audio real.
 
 function amplitudObjetivo() {
-  if (estado === "hablando" || estado === "musica") return nivelCrudo;
+  // "escuchando" también sigue el nivel real -- ahora es el mic en vivo,
+  // no un valor fijo (así se ve mover con la voz del usuario).
+  if (estado === "hablando" || estado === "musica" || estado === "escuchando") return nivelCrudo;
   if (estado === "pensando") return AMPLITUD_PENSANDO;
-  if (estado === "escuchando") return AMPLITUD_ESCUCHANDO;
   return AMPLITUD_IDLE;
 }
 
@@ -214,7 +244,7 @@ function animar() {
   // La velocidad de la onda también sigue el nivel: antes era fija
   // mientras hablaba, y una onda moviéndose siempre igual sin importar
   // qué tan fuerte suena la voz es justo lo que se veía desacoplado.
-  if (estado === "hablando" || estado === "musica") {
+  if (estado === "hablando" || estado === "musica" || estado === "escuchando") {
     wave.setSpeed(0.04 + nivelSuave * 0.18);
   }
   requestAnimationFrame(animar);
@@ -243,18 +273,53 @@ function dejarDeTraerAlFrente() {
   }
 }
 
+// El estilo "ios9" de SiriWave ignora el color pasado al constructor: trae
+// sus curvas hardcodeadas en azul/rojo/verde (ver iOS9Curve.getDefinition()
+// en siriwave.umd.js) y las dibuja con su propio color fijo, no con el de
+// la instancia. Por eso cambiar COLORES/el drop-shadow de afuera nunca
+// pintaba la onda en sí -- solo el brillo alrededor. Acá se recolorean a
+// mano las curvas reales (menos la "support line" blanca de fondo, que se
+// deja como viene) cada vez que cambia el estado.
+function hexARgb(hex) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
+// Colores originales de la librería (multicolor: azul/rojo/verde) para
+// poder restaurarlos en "hablando" -- al usuario le gusta ese look
+// mientras Tero habla, y solo ese, así que es el único estado que no se
+// fuerza a un color plano.
+const COLORES_ORIGINALES_CURVAS = wave.curves.map((c) => c.definition.color);
+
 function aplicarEstado(nuevo) {
   const eraHablando = estado === "hablando";
   estado = nuevo;
   wave.setSpeed(estado === "pensando" ? 0.12 : 0.06);
+  const color = COLORES[estado] || COLORES.idle;
   document.getElementById("onda").style.filter =
-    `drop-shadow(0 0 12px ${COLORES[estado] || COLORES.idle})`;
+    `drop-shadow(0 0 12px ${color})`;
+  if (estado === "hablando") {
+    wave.curves.forEach((curva, i) => {
+      curva.definition.color = COLORES_ORIGINALES_CURVAS[i];
+    });
+  } else {
+    const rgb = hexARgb(color);
+    for (const curva of wave.curves) {
+      if (!curva.definition.supportLine) curva.definition.color = rgb;
+    }
+  }
   if (estado === "hablando" && !eraHablando) {
     empezarATraerAlFrente();
   } else if (estado !== "hablando" && eraHablando) {
     dejarDeTraerAlFrente();
   }
 }
+// Recién acá es seguro llamarla: ya existen COLORES_ORIGINALES_CURVAS y
+// hexARgb. Llamarla más arriba, antes de que el const se declare, tira un
+// ReferenceError de TDZ que corta en seco el resto del script (incluido
+// el WebSocket y el loop de animación) -- pasó de verdad, por eso la
+// onda quedaba congelada y sin recolorear nunca.
+aplicarEstado("idle");
 
 // Progreso interpolado: el poll de Spotify llega cada ~5s, pero la
 // canción avanza continuamente. En vez de saltar cada 5s, se guarda el
@@ -265,6 +330,7 @@ let progresoBase = 0;
 let duracionMs = 0;
 let momentoRecibido = 0;
 let reproduciendoAlgo = false;
+let pausado = false;
 
 function formatearTiempo(ms) {
   const totalSeg = Math.max(0, Math.floor(ms / 1000));
@@ -275,9 +341,14 @@ function formatearTiempo(ms) {
 
 function aplicarCancion(info) {
   const elInfo = document.getElementById("info");
+  const elProgreso = document.getElementById("fila-progreso");
   if (!info) {
+    // Los segundos transcurridos/restantes viven en #fila-progreso, un
+    // bloque aparte de #info -- ocultar solo #info dejaba el tiempo (y la
+    // barra) visibles para siempre. Se ocultan los dos juntos.
     reproduciendoAlgo = false;
     elInfo.classList.remove("visible");
+    elProgreso.classList.remove("visible");
     return;
   }
   document.getElementById("cancion").textContent = info.texto;
@@ -285,12 +356,17 @@ function aplicarCancion(info) {
   duracionMs = info.duracion_ms;
   momentoRecibido = performance.now();
   reproduciendoAlgo = true;
+  pausado = !info.reproduciendo;
+  document.getElementById("barra-relleno").classList.toggle("pausado", pausado);
   elInfo.classList.add("visible");
+  elProgreso.classList.add("visible");
 }
 
 function animarProgreso() {
   if (reproduciendoAlgo && duracionMs > 0) {
-    const transcurridoReal = performance.now() - momentoRecibido;
+    // En pausa no se suma tiempo transcurrido: el progreso queda
+    // congelado en lo último que reportó Spotify, no sigue avanzando.
+    const transcurridoReal = pausado ? 0 : performance.now() - momentoRecibido;
     const progresoMs = Math.min(duracionMs, progresoBase + transcurridoReal);
     document.getElementById("barra-relleno").style.width =
       `${(progresoMs / duracionMs) * 100}%`;

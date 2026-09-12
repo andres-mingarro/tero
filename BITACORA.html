@@ -272,6 +272,66 @@
       <div class="tags"><span class="tag">feature</span></div>
       <p>Nueva herramienta <code>calcular_viaje</code> (<code>herramientas/mapas.py</code>): geocodifica con la misma API de Open-Meteo que usa <code>clima.py</code>, calcula distancia/tiempo real con el servidor demo de <a href="https://project-osrm.org/">OSRM</a> (gratis, sin clave), y abre la ruta en Google Maps.</p>
     </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">infra</span></div>
+      <p>Primer commit y push a un repo remoto vacío (<code>origin</code>, SSH). Se agregó <code>README.md</code> y <code>install.sh</code> (instalador ejecutable que justifica cada dependencia de sistema antes de instalarla, en vez de solo documentarlo).</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Rediseño visual de la boca a pedido del usuario (varias vueltas): barra de progreso estilo "luz" (gradiente animado + brillo respirando, adaptado de un HTML que pasó el usuario), puntito en la punta del progreso, estado de pausa con pulso blanco/rojo → blanco/verde. Se probó fusionar la barra como fondo de la propia onda — quedó feo, se revirtió al diseño con barra separada.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>Reposicionar la ventana de la boca por código (x/y de creación, o <code>wmctrl -e</code>) no tiene ningún efecto en este Wayland/Mutter, confirmado con un margen de 400px sin cambio visual alguno. Se activó <code>easy_drag=True</code> en <code>boca/ventana.py</code>: la única forma real de moverla es arrastrándola con el mouse. No hay forma de que "recuerde" la posición entre reinicios del proceso, porque aplicar esa posición guardada tendría el mismo problema.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><code>reproducir_musica_aleatoria</code>: "poné música" genérico siempre volvía a la misma canción (<code>control_media</code> solo hace play/pausa sobre lo que ya está cargado, no elige nada nuevo). Nueva herramienta que elige una canción al azar de "Tus me gusta" en Spotify — requirió pedir el scope <code>user-library-read</code> y volver a loguearse (con <code>show_dialog=true</code>: sin eso Spotify no vuelve a mostrar la pantalla de permisos si la app ya estaba autorizada, y el scope nuevo no quedaba aplicado).</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>La boca reacciona al <strong>micrófono en vivo</strong> mientras Tero escucha (antes usaba una amplitud fija en ese estado): el <code>Grabador</code> de <code>main.py</code> manda el RMS de cada bloque grabado a la boca. Color de "escuchando" cambiado a blanco.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>"Cambiá de canción" / "siguiente tema" fallaban de forma reproducible: el modelo decía en voz alta "reproducir siguiente" en vez de llamar a <code>control_media</code>. Se descartó memoria/historial como causa (pasaba hasta con historial limpio) y se aisló con una llamada directa a Ollama fuera del daemon: con el prompt real, a veces tool-calleaba bien y a veces no -- aleatoriedad del muestreo, no un bug determinístico. Fix: <code>temperature: 0.2</code> en la llamada a Ollama (<code>cerebro/router.py</code>) -- tool calling mucho más confiable a costa de algo de variedad en cómo habla.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>La onda de la boca nunca cambiaba de color de verdad, en ningún estado: el estilo <code>"ios9"</code> de SiriWave ignora el color pasado al constructor y trae sus curvas hardcodeadas en azul/rojo/verde adentro de la librería (<code>iOS9Curve.getDefinition()</code>), así que <code>COLORES[estado]</code> solo estaba moviendo el <code>drop-shadow</code> de afuera. Fix: <code>aplicarEstado()</code> ahora recolorea a mano las curvas reales de la instancia en cada cambio de estado. A pedido del usuario, "hablando" es la excepción -- ahí se restauran los colores originales de la librería (el multicolor le gustaba tal cual estaba).</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>Al escribir el fix de color de arriba se introdujo sin querer una llamada a <code>aplicarEstado("idle")</code> antes de que existiera el <code>const</code> del que depende -- un <code>ReferenceError</code> de TDZ que cortaba en seco el resto del script (WebSocket y loop de animación incluidos), dejando la boca congelada sin recolorear nunca más. Se movió la llamada de inicialización a después de todas las declaraciones que usa.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">fix</span></div>
+      <p>La onda no se abría casi nada mientras "escuchando" pese al fix de color: el nivel del mic usaba un multiplicador fijo (<code>sqrt(rms)*2.5</code>) calibrado a ojo, y el rms real de un mic vive en una escala mucho más baja e impredecible que la del audio de TTS. Reemplazado por auto-gain en <code>main.py</code>: se sigue el pico de volumen reciente y se normaliza contra eso, así que hablar a volumen normal abre la onda casi al máximo sea cual sea el mic.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>El modelo respondió una vez con una pregunta de seguimiento pese a que el prompt lo prohíbe ("de nada, ¿qué tal si ahora ponemos música?"). Esa pregunta quedó en el historial, y el turno siguiente sin relación ("dos más dos") se interpretó como si fuera la respuesta a ella, disparando <code>reproducir_musica_aleatoria</code> en vez de contestar la cuenta. Fix determinístico en código, no otra frase de prompt: <code>_sin_pregunta_de_seguimiento()</code> corta cualquier pregunta colgada al final de una respuesta hablada antes de que se diga o se guarde en el historial.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>Reaparición del bug de "decir la herramienta en vez de llamarla", ahora con dos frases nuevas: "poné play" → dijo "reproducir" en voz; "ponme play" → dijo literalmente "reproducir_musica_aleatoria". Pese a <code>temperature: 0.2</code> y a que el prompt ya pide usar la herramienta. En vez de seguir bajando la temperatura o sumando frases al prompt, se generalizó la detección en código: <code>_herramienta_dicha_en_vez_de_llamada()</code> reconoce cuando la respuesta libre del modelo es, literal, el nombre de una acción de <code>control_media</code> o de cualquier herramienta sin argumentos obligatorios, y la ejecuta de verdad. De paso se notó que <code>reproducir_musica_aleatoria</code> nunca había sido agregada a las herramientas "silenciosas" -- ya está.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p>Si la música queda en pausa (o se detiene) 30 segundos seguidos, el reproductor de la boca (nombre de canción + barra de progreso) desaparece en vez de quedar congelado ahí para siempre. De paso se encontró que la barra/tiempos vivían en un bloque HTML separado del nombre de la canción (<code>#fila-progreso</code>, afuera de <code>#info</code>) que nunca se ocultaba -- ahora los dos bloques se muestran/ocultan juntos.</p>
+    </div>
   </section>
 </main>
 </body>

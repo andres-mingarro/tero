@@ -95,7 +95,11 @@ cacheado.
 ### 7. Spotify (opcional, para música real)
 
 Sin esto, los pedidos de música fallan. Con esto, `reproducir_musica`
-busca la canción real y la reproduce (no solo abre una búsqueda).
+busca la canción real y la reproduce (no solo abre una búsqueda), y
+`reproducir_musica_aleatoria` elige algo nuevo de "Tus me gusta" para los
+pedidos genéricos ("poné música") en vez de repetir siempre lo último.
+Ambas encolan varios temas más detrás del primero, así que "siguiente"
+tiene a dónde avanzar.
 
 1. Andá a https://developer.spotify.com/dashboard, creá una app (Web API
    únicamente).
@@ -109,7 +113,10 @@ busca la canción real y la reproduce (no solo abre una búsqueda).
    ```
 
    Se abre el navegador, autorizás, y el refresh token queda guardado en
-   `~/.config/tero/spotify_token.json` (permisos 600, fuera del repo).
+   `~/.config/tero/spotify_token.json` (permisos 600, fuera del repo). Si
+   ya habías logueado antes y el scope pedido cambió (quedó registrado en
+   `INSTALACIONES.md`), borrá ese archivo y volvé a loguearte — Spotify no
+   re-pregunta por permisos nuevos si la app ya estaba autorizada.
 
 Requiere **Spotify Premium** — la Web API no deja reproducir en cuentas
 free (sí deja buscar).
@@ -160,9 +167,10 @@ transcripción, qué herramienta se llamó, y tiempos de cada etapa.
 
 ### La boca (overlay opcional)
 
-Ventana flotante con una onda animada que reacciona a la voz de Tero y a
-la música de fondo, más el nombre/progreso de lo que suena en Spotify. Es
-un cliente aparte, opcional — el daemon principal funciona sin ella.
+Ventana flotante con una onda animada que reacciona a la voz de Tero, al
+micrófono mientras escucha, y a la música de fondo, más el nombre/progreso
+de lo que suena en Spotify (se oculta solo si queda pausado 30s). Es un
+cliente aparte, opcional — el daemon principal funciona sin ella.
 
 ```bash
 QT_QPA_PLATFORM=xcb uv run python -m boca.ventana
@@ -174,7 +182,8 @@ quede "siempre encima" mientras habla.
 
 ## Herramientas disponibles
 
-`consultar_clima`, `reproducir_musica`, `control_media`, `ajustar_volumen`,
+`consultar_clima`, `reproducir_musica`, `reproducir_musica_aleatoria`,
+`control_media`, `ajustar_volumen`,
 `abrir_url`, `buscar_en_sitio` (mercadolibre/google/youtube/amazon/maps),
 `calcular_viaje` (distancia y ruta entre dos lugares), `leer_terminal`,
 `consultar_hora`, `mandar_al_celular`. Cada una es un archivo de ~20-80

@@ -61,14 +61,30 @@ def _beep(frecuencia_hz: float, duracion_s: float = 0.08) -> None:
 class Grabador:
     """Acumula audio de un InputStream mientras está activo."""
 
-    def __init__(self, muestreo_hz: int, canales: int):
+    def __init__(self, muestreo_hz: int, canales: int, on_nivel=None):
         self._muestreo_hz = muestreo_hz
         self._canales = canales
         self._trozos: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
+        # Opcional: nivel del mic en vivo mientras graba, para que la boca
+        # se mueva con la voz real del usuario en vez de un valor fijo.
+        self._on_nivel = on_nivel
+        # Auto-gain en vez de un multiplicador fijo: un número calibrado a
+        # mano (ej. rms*2.5) queda bien con un mic y mal con otro -- el rms
+        # real de un mic vive en una escala mucho más baja e impredecible
+        # que la del audio de TTS (que sale normalizado). Se seguí el pico
+        # de volumen reciente y se normaliza contra eso, así que hablar a
+        # volumen normal siempre abre la onda casi al máximo, sea cual sea
+        # el mic. El pico decae lento (no de golpe en un silencio corto
+        # entre palabras) pero sube al instante si se habla más fuerte.
+        self._pico_rms = 0.02
 
     def _callback(self, indata, frames, tiempo, status):
         self._trozos.append(indata.copy())
+        if self._on_nivel is not None:
+            rms = float(np.sqrt(np.mean(np.square(indata))))
+            self._pico_rms = max(rms, self._pico_rms * 0.999)
+            self._on_nivel(min(1.0, rms / self._pico_rms) ** 0.5)
 
     def iniciar(self) -> None:
         self._trozos = []
@@ -93,7 +109,9 @@ class Tero:
     def __init__(self, config: dict):
         self._config = config
         self._plataforma = crear_plataforma(tecla=config["tecla"]["nombre"])
-        self._grabador = Grabador(config["audio"]["muestreo_hz"], config["audio"]["canales"])
+        self._grabador = Grabador(
+            config["audio"]["muestreo_hz"], config["audio"]["canales"], on_nivel=self._nivel_boca
+        )
         print("Cargando modelo de transcripción...")
         self._stt = STT(**config["stt"])
         print("Cargando voz...")
@@ -109,6 +127,12 @@ class Tero:
         self._umbral_toggle_s = config["tecla"]["umbral_toggle_s"]
 
         self._ultimo_poll_cancion = 0.0
+        # Cuándo empezó la pausa actual (None si no está pausado o no hay
+        # nada cargado). Sirve para ocultar el reproductor de la boca si
+        # queda pausado mucho tiempo -- mostrar "pausado" para siempre
+        # después de que el usuario se olvidó de la música es ruido visual
+        # que no aporta nada.
+        self._pausado_desde: float | None = None
 
     def _crear_boca(self) -> ServidorBoca | None:
         # La boca es un cliente opcional: si esto falla por lo que sea, el
@@ -232,7 +256,18 @@ class Tero:
         if ahora - self._ultimo_poll_cancion < 5.0:
             return
         self._ultimo_poll_cancion = ahora
-        self._boca.cancion(musica.estado_reproduccion())
+        info = musica.estado_reproduccion()
+        if info is None or info["reproduciendo"]:
+            self._pausado_desde = None
+        else:
+            if self._pausado_desde is None:
+                self._pausado_desde = ahora
+            elif ahora - self._pausado_desde >= 30.0:
+                # Pausado hace rato: se oculta el reproductor entero (como si
+                # no hubiera nada cargado), no solo se lo deja congelado en
+                # pausa para siempre.
+                info = None
+        self._boca.cancion(info)
 
 
 def main() -> None:
