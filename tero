@@ -111,6 +111,12 @@ else
   aviso "Spotify sin loguear: la música no va a andar (uv run python -m herramientas._spotify_auth)"
 fi
 
+if [ -s "$HOME/.config/tero/groq_key" ]; then
+  ok "Transcripción: Groq online (Whisper local de respaldo si falla)"
+else
+  aviso "Sin key de Groq (~/.config/tero/groq_key): transcripción 100% local, se carga Whisper al arrancar"
+fi
+
 faltantes=""
 for binario in playerctl wpctl pw-dump wmctrl notify-send; do
   command -v "$binario" >/dev/null 2>&1 || faltantes="$faltantes $binario"
@@ -122,7 +128,11 @@ else
 fi
 
 # --- daemon ---------------------------------------------------------------
-paso "Arrancando el daemon (carga Whisper y la voz, tarda unos segundos)"
+if [ -s "$HOME/.config/tero/groq_key" ]; then
+  paso "Arrancando el daemon (carga la voz; Whisper local solo si Groq falla)"
+else
+  paso "Arrancando el daemon (carga Whisper y la voz, tarda unos segundos)"
+fi
 uv run python main.py >>"$LOG" 2>&1 &
 PID_DAEMON=$!
 
@@ -130,17 +140,23 @@ hito_stt=0
 hito_tts=0
 hito_llm=0
 listo=0
+stt_local=0 # 1 si esta corrida cargó Whisper local (no Groq) para transcribir
 for _ in $(seq $((ESPERA_DAEMON_S * 2))); do
   if ! kill -0 "$PID_DAEMON" 2>/dev/null; then
     error "El daemon se murió al arrancar. Últimas líneas:"
     tail -n 15 "$LOG" | sed 's/^/      /'
     exit 1
   fi
+  if [ $hito_stt -eq 0 ] && grep -q "STT: Groq online" "$LOG"; then
+    hito_stt=1
+  fi
   if [ $hito_stt -eq 0 ] && grep -q "Cargando modelo de transcripción" "$LOG"; then
-    hito_stt=1; paso "Cargando el modelo de transcripción"
+    hito_stt=1; stt_local=1; paso "Cargando el modelo de transcripción"
   fi
   if [ $hito_tts -eq 0 ] && grep -q "Cargando voz" "$LOG"; then
-    hito_tts=1; ok "Modelo de transcripción cargado"; paso "Cargando la voz"
+    hito_tts=1
+    [ $stt_local -eq 1 ] && ok "Modelo de transcripción cargado"
+    paso "Cargando la voz"
   fi
   if [ $hito_llm -eq 0 ] && grep -q "Cargando modelo de lenguaje" "$LOG"; then
     hito_llm=1; ok "Voz cargada"; paso "Cargando el modelo de lenguaje (recién reiniciada la máquina tarda)"

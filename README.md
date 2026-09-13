@@ -92,6 +92,28 @@ No necesita instalación aparte: `faster-whisper` descarga el modelo
 se usa, desde HuggingFace. Con GPU tarda ~15s la descarga inicial y queda
 cacheado.
 
+### 6b. Groq (opcional, transcripción online)
+
+Sin esto, Whisper local hace toda la transcripción y se carga al arrancar
+(paso 6, arriba). Con una API key de Groq, la transcripción va primero por
+**Groq** (mismo `whisper-large-v3`, gratis, sin tarjeta) y Whisper local
+queda de respaldo, cargado recién si Groq falla — ver la sección "STT:
+Groq online, Whisper local de respaldo" en `CLAUDE.md` para el detalle y
+la contrapartida de privacidad (la voz sale de la máquina en cada pedido
+mientras Groq esté disponible).
+
+1. Creá una cuenta en https://console.groq.com (no pide tarjeta).
+2. En **Settings → Data Controls**, activá **Global ZDR** (Zero Data
+   Retention), para que no retengan el audio.
+3. Generá una key en **API Keys** y guardala:
+
+   ```bash
+   mkdir -p ~/.config/tero
+   read -rsp "Key de Groq: " K && printf '%s' "$K" > ~/.config/tero/groq_key
+   chmod 600 ~/.config/tero/groq_key
+   unset K
+   ```
+
 ### 7. Spotify (opcional, para música real)
 
 Sin esto, los pedidos de música fallan. Con esto, `reproducir_musica`
@@ -172,9 +194,9 @@ Tero
   ✓ No hay otra instancia corriendo
   ✓ Ollama activo (modelo qwen3:4b-instruct)
   ✓ Spotify logueado
+  ✓ Transcripción: Groq online (Whisper local de respaldo si falla)
   ✓ Binarios de sistema presentes
-  … Arrancando el daemon (carga Whisper y la voz, tarda unos segundos)
-  ✓ Modelo de transcripción cargado
+  … Arrancando el daemon (carga la voz; Whisper local solo si Groq falla)
   ✓ Voz cargada
   ✓ Daemon escuchando (tecla: KEY_RIGHTCTRL)
   ✓ Boca en pantalla
