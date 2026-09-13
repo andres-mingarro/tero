@@ -31,6 +31,15 @@ from herramientas import catalogo, ejecutar, es_error
 _MAX_TOKENS_RESPUESTA = 200
 _TIMEOUT_S = 10.0
 
+# El calentamiento del modelo (ver `precargar`) va con un timeout aparte y
+# mucho más largo. Con los 10s de arriba, recién reiniciada la máquina, el
+# cliente cortaba antes de que terminara, y Ollama *aborta* lo que estaba
+# haciendo cuando el cliente se desconecta ("client connection closed
+# before llama-server finished loading, aborting load"). El pedido
+# siguiente empezaba de cero y volvía a cortarse: un bucle que nunca se
+# destrababa, con Tero contestando "se colgó el modelo local".
+_TIMEOUT_CARGA_S = 180.0
+
 # Cuántas rondas de tool calling se permiten en un mismo turno. Sin esto,
 # un pedido compuesto ("buscá X y mandámelo al celular") quedaba a medias:
 # el modelo llamaba una sola herramienta y después inventaba en el resumen
@@ -76,6 +85,7 @@ class Cerebro:
     def __init__(self, modelo: str = "qwen3:4b-instruct"):
         self._modelo = modelo
         self._cliente = Client(timeout=_TIMEOUT_S)
+        self._cliente_carga = Client(timeout=_TIMEOUT_CARGA_S)
         # Una lista por turno, no una lista plana de mensajes: un turno con
         # herramientas ocupa varios mensajes (assistant con tool_calls +
         # un tool por resultado) y recortar por cantidad de mensajes podría
@@ -83,7 +93,42 @@ class Cerebro:
         # lo originó. Recortando por turnos enteros eso no puede pasar.
         self._historial: list[list[dict]] = []
 
+    def _cargado(self) -> bool:
+        try:
+            return any(m.model == self._modelo for m in self._cliente.ps().models)
+        except Exception:
+            return False
+
+    def precargar(self) -> None:
+        """Deja el modelo cargado y con el prompt del sistema ya procesado.
+
+        Cargar el modelo no alcanza. Medido recién reiniciada la máquina:
+        la carga en sí tardó 3,3s, pero después la primera consulta tiene
+        que procesar el prompt del sistema más el catálogo de herramientas
+        (~2300 tokens) sin nada en caché y con un tercio del modelo en CPU,
+        y eso solo pasó los 10s. Las consultas siguientes son rápidas
+        porque Ollama reutiliza ese prefijo ya procesado. Por eso el
+        calentamiento es una consulta con el mismo system y las mismas
+        herramientas, que deja el prefijo en caché, y no un prompt vacío.
+
+        Se llama al arrancar y antes de cada consulta: Ollama descarga el
+        modelo tras 5 minutos sin uso, y ahí el caché se pierde. Si el
+        modelo sigue cargado, es una consulta local barata.
+        """
+        if self._cargado():
+            return
+        self._cliente_carga.chat(
+            model=self._modelo,
+            messages=[
+                {"role": "system", "content": PROMPT_SISTEMA},
+                {"role": "user", "content": "hola"},
+            ],
+            tools=catalogo(),
+            options={"num_predict": 1, "temperature": 0.2},
+        )
+
     def _chat(self, mensajes: list, con_herramientas: bool):
+        self.precargar()
         return self._cliente.chat(
             model=self._modelo,
             messages=mensajes,
@@ -99,8 +144,20 @@ class Cerebro:
 
     def responder(self, texto_usuario: str) -> str:
         respuesta_texto, mensajes_turno = self._responder(texto_usuario)
-        self._historial.append([{"role": "user", "content": texto_usuario}, *mensajes_turno])
-        self._historial = self._historial[-_TURNOS_HISTORIAL:]
+        # Solo entran al historial los turnos que usaron alguna herramienta.
+        # Un turno de puro texto no aporta nada que se necesite después (el
+        # historial existe para "poné metallica" -> "pausala", y eso es un
+        # turno con herramienta), y en cambio puede envenenar el siguiente:
+        # si Whisper escucha "Buena música." en vez de "Poné música." y el
+        # modelo contesta "perfecto", ese intercambio le enseña que a un
+        # pedido de música se contesta escribiendo. Medido con
+        # qwen3:4b-instruct: "Poné música." sale 20/20 tool calls sin
+        # historial y 13/20 detrás de ese turno -- las otras 7 veces dice en
+        # voz alta "reproducir_musica_aleatoria" en vez de llamarla. Detrás
+        # de un turno CON herramienta sigue 20/20, y "pausala" también.
+        if any(mensaje.get("role") == "tool" for mensaje in mensajes_turno):
+            self._historial.append([{"role": "user", "content": texto_usuario}, *mensajes_turno])
+            self._historial = self._historial[-_TURNOS_HISTORIAL:]
         return respuesta_texto
 
     def _mensajes_historial(self) -> list[dict]:

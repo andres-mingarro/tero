@@ -92,13 +92,43 @@ necesidad.
 | Pieza | Elección | Windows (nunca implementado) | Linux (real) |
 |---|---|---|---|
 | Audio in/out | `sounddevice` | igual | igual |
-| STT | `faster-whisper`, modelo `large-v3`, es | igual | igual |
+| STT | Groq (Whisper `large-v3` online) con `faster-whisper` local de respaldo, ver más abajo | igual | igual |
 | Modelo local | Qwen3 4B Instruct vía Ollama | igual | igual |
 | TTS | Piper (ONNX, voz es) | igual | igual |
 | Tecla global | — | `pynput` | `evdev` |
 | Ventana activa | — | `pygetwindow` / Win32 | `wmctrl` / D-Bus |
 | Media | — | teclas multimedia | MPRIS (`playerctl`) + Web API de Spotify |
 | Overlay | pywebview (Qt) + WebSocket | — | `QT_QPA_PLATFORM=xcb` (sin `gtk4-layer-shell`, no instalado) |
+
+### STT: Groq online, Whisper local de respaldo
+
+Decisión tomada el 2026-09-13, tras medir en vivo que un modelo chico mal
+transcripto ("Poné música" → "Buena música.") le saca al cerebro toda
+chance de acertar, sin importar cuán bien elija herramientas.
+
+Con una API key de Groq en `~/.config/tero/groq_key` (ver
+INSTALACIONES.md), cada pedido se transcribe primero con
+`whisper-large-v3` en **Groq** (gratis, plan free, sin tarjeta): mismo
+modelo y precisión que el local, sin ocupar los ~3,7 GB de VRAM que
+Whisper se lleva de forma permanente. El plan gratis (2000 pedidos/día)
+queda muy por encima de lo que genera un push-to-talk personal.
+
+Whisper local (`faster-whisper`) queda como **respaldo**, cargado recién
+la primera vez que Groq falla (sin key, sin red, límite alcanzado, error
+del servidor) -- nunca al arrancar. Al fallar, Tero avisa por voz
+("Pasando a modo offline, esperá que cargo Whisper") y sigue con el mismo
+audio, sin pedir que se repita el pedido. Cuando Groq vuelve a responder,
+suelta la referencia al modelo local (libera la VRAM) y avisa "Volví a
+modo online". Implementado en `voz/stt.py` (`STTHibrido`). Sin key de
+Groq, el comportamiento es el de siempre: 100% local, cargado al
+arrancar.
+
+**Contrapartida de privacidad, explícita:** mientras Groq esté disponible,
+la voz de cada pedido sale de la máquina hacia sus servidores (no la
+pantalla ni la terminal, ver más abajo). Se activó Zero Data Retention en
+la cuenta para que no la retengan. Decisión del usuario, sabiendo esto —
+lo que le importa proteger es la comprensión de frases libres, no el
+conocimiento general del modelo (ver charla del 2026-09-13).
 | Servicio | — | Task Scheduler | systemd user (no configurado todavía) |
 
 `modelo small` se probó primero pero alucinaba nombres propios (Trelew,
@@ -284,7 +314,7 @@ Del beep a la primera sílaba, camino local:
 
 | Etapa | Tiempo |
 |---|---|
-| STT (objetivo con Whisper `small`; se subió a `large-v3` por precisión, ver Stack) | 0,3–0,8 s |
+| STT (Groq online, medido: ~0,6–0,7 s; con Whisper `small` local se subió a `large-v3` por precisión, ver sección STT) | 0,3–0,8 s |
 | Modelo local (tool call) | 0,3–0,6 s |
 | Ejecución de herramienta | ~0 |
 | TTS primer sonido (streaming) | 0,2 s |

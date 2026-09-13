@@ -20,6 +20,11 @@ class ServidorBoca:
     def __init__(self, puerto: int = PUERTO):
         self._puerto = puerto
         self._clientes: set = set()
+        # El último aviso de carga, para mandárselo a quien se conecte a
+        # mitad de camino: la boca de GNOME arranca con la sesión y se
+        # conecta sola en cualquier momento del arranque del daemon, y sin
+        # esto se quedaba sin saber que Tero todavía estaba cargando.
+        self._carga_actual: dict | None = None
         self._loop = asyncio.new_event_loop()
         self._listo = threading.Event()
         self._hilo = threading.Thread(target=self._correr, daemon=True)
@@ -36,6 +41,11 @@ class ServidorBoca:
         async def manejar(ws) -> None:
             self._clientes.add(ws)
             print("(boca: cliente conectado)")
+            if self._carga_actual is not None:
+                try:
+                    await ws.send(json.dumps({"carga": self._carga_actual}))
+                except Exception:
+                    pass
             try:
                 await ws.wait_closed()
             finally:
@@ -77,3 +87,10 @@ class ServidorBoca:
         """info: {"texto", "progreso_ms", "duracion_ms"} o None si no suena
         nada. La boca interpola el progreso entre actualizaciones."""
         self._difundir({"cancion": info})
+
+    def carga(self, texto: str | None, progreso: float = 0.0) -> None:
+        """Aviso de arranque ("Cargando voz", 0.33), o texto=None cuando ya
+        terminó de cargar. El progreso es por etapas, no una medición: ni
+        faster-whisper ni Piper ni Ollama informan avance mientras cargan."""
+        self._carga_actual = None if texto is None else {"texto": texto, "progreso": progreso}
+        self._difundir({"carga": self._carga_actual})

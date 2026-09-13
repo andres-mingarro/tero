@@ -399,6 +399,87 @@
       </ul>
       <p>Probado de dos formas: con las lecturas mockeadas para los seis escenarios (normal, RAM crítica, RAM baja, GPU frenándose, VRAM casi llena, equipo sin NVIDIA) y end-to-end bajando el umbral de RAM a un valor absurdo para forzar un corte real — arrancó entero, disparó, notificó, cerró limpio y el lanzador lo reportó como cierre por salud y no como caída.</p>
     </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">commit</span></div>
+      <p><strong>Rama <code>feature/boca-gnome</code>: la boca reescrita como extensión de GNOME Shell</strong>, en evaluación como reemplazo de la boca de pywebview. <code>4b86c08</code>.</p>
+      <p>Motivo: la boca de pywebview levanta QtWebEngine (un Chromium entero) para dibujar una onda de 260x74, y eso cuesta <strong>~1300 MB de RAM</strong> contra 434 MB del daemon. Medido comparando el PSS de <code>gnome-shell</code> con la extensión habilitada y deshabilitada: la extensión cuesta <strong>menos que el ruido de medición (±1,4 MB)</strong> — corre adentro de un proceso que ya está en memoria, en vez de levantar uno propio.</p>
+      <p>Implementación: <code>onda.js</code> porta a Cairo la matemática de <code>iOS9Curve</code> de SiriWave (senos superpuestos que nacen/mueren solos, con envolvente), dibujando sobre un <code>St.DrawingArea</code>; <code>enlace.js</code> es un cliente más del mismo WebSocket (<code>ws://127.0.0.1:8765</code>) que ya consumía la boca vieja, sin tocar una línea del daemon. De yapa resuelve un problema viejo: el "siempre encima" nunca funcionó bien bajo Mutter con la boca vieja (peleaba con <code>wmctrl</code> en un bucle mientras hablaba); siendo parte del shell, el actor vive en la capa de <em>chrome</em> (<code>addChrome</code>), por encima de las ventanas, sin nada que pelear.</p>
+      <p>Trampas de GNOME 50 documentadas en <code>boca-gnome/README.md</code> para no volver a perder tiempo con ellas: <code>--nested</code> ya no existe para levantar un shell de prueba (ahora es <code>--devkit</code>); el parámetro <code>affectsInputRegion</code> de <code>addChrome</code> fue retirado (tira "Unrecognized parameter" y la extensión ni carga; el click-through sale de <code>reactive: false</code> en el actor); y no hay forma de que Wayland descubra una extensión nueva sin reiniciar la sesión entera.</p>
+      <p>Diseñada para poder abandonarse sin costo: el diff contra <code>main</code> no toca una línea de <code>main.py</code>, <code>boca/</code>, <code>cerebro/</code>, <code>herramientas/</code> ni <code>salud.py</code> — lo único fuera de <code>boca-gnome/</code> es la detección en <code>./tero</code>, que si ve la extensión habilitada no levanta la de pywebview (para no tener dos ondas superpuestas), y <code>boca-gnome/desinstalar.sh</code> vuelve todo atrás.</p>
+      <p>Quedó verificado en una sesión anidada (carga y se habilita sin errores de JS, sobrevive un ciclo <code>disable</code>/<code>enable</code>, se conecta de verdad al daemon) pero <strong>sin ver todavía cómo se ubica en la pantalla real</strong> — GNOME bloquea la API de screenshot para llamadores no autorizados, así que eso solo lo puede juzgar el usuario, y recién después de un logout (Wayland no relee extensiones nuevas en caliente).</p>
+    </div>
+  </section>
+
+  <section class="dia">
+    <h2>2026-09-13</h2>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p><strong>La trampa que más tiempo costó de la sesión: <code>gnome-extensions disable</code> + <code>enable</code> no recarga el código.</strong> GNOME cachea los módulos ES de la extensión, y al re-habilitarla vuelve a correr <strong>el que quedó en memoria</strong>, no el del disco. Falla en silencio y con toda la pinta de haber funcionado: no hay error, no hay warning, y el daemon hasta registra la reconexión del WebSocket — la hace el código viejo. Se confirmó con un <code>log()</code> marcador al principio de <code>enable()</code> que nunca aparecía en el journal tras varios <code>disable</code>/<code>enable</code>, mientras la boca seguía mostrando el layout de antes del cambio.</p>
+      <p>En Wayland la única forma de cargar código nuevo es cerrar sesión y volver a entrar — un logout por iteración, a ciegas, encima con GNOME bloqueando la captura de pantalla del shell, así que el que mira siempre tiene que ser el usuario. Se gastaron varios logouts así hasta ver el patrón. Documentado en <code>boca-gnome/README.md</code>.</p>
+      <p>Solución de fondo, dos herramientas nuevas para no volver a depender de un logout por cambio:</p>
+      <ul>
+        <li><strong><code>boca-gnome/probar.sh</code></strong>: abre un GNOME Shell anidado (<code>gnome-shell --devkit</code>, sobre <code>dbus-run-session</code>) — una ventana con un escritorio GNOME entero que arranca de cero y sí carga el código del disco. Se prueba a mano ahí (arrastre incluido), se cierra, se repite. Cierra el anidado anterior con <code>--cerrar</code> antes de abrir uno nuevo, y barre por bus de D-Bus (<code>/tmp/dbus-*</code>) los procesos que un anidado arrastra (gvfs, evolution, goa, localsearch...) porque matar solo <code>gnome-shell</code> los deja huérfanos — encontrados así <strong>202 procesos huérfanos</strong> de pruebas de esta misma sesión, recuperando ~780 MB de RAM al limpiarlos.</li>
+        <li><strong><code>boca-gnome/previsualizar.js</code></strong>: <code>onda.js</code> y <code>barra.js</code> son Cairo puro (no tocan St ni Clutter), así que corren en un <code>gjs</code> suelto fuera de gnome-shell. Renderiza varias escenas (música, recién empezada, pausado, escuchando, pensando, idle) a un único PNG ampliado 3x, para ver un cambio de dibujo sin gastar ni un logout ni un anidado. Ya encontró dos bugs reales antes de que llegaran al usuario (ver entrada de la barra, más abajo).</li>
+      </ul>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>La boca quedaba <strong>tapada por el dock de Ubuntu</strong> (anclado abajo) y el nombre de la canción no se leía. <code>_ubicar()</code> posicionaba contra el rectángulo crudo del monitor; el fix pasa a usar <code>Main.layoutManager.getWorkAreaForMonitor()</code> (la misma API que usa <code>ubuntu-dock@ubuntu.com</code> para no invadir su propia franja), que ya viene con el espacio del dock descontado.</p>
+      <p>Eso solo no alcanzaba: la extensión puede habilitarse en el login <em>antes</em> de que el dock reserve su franja, y ahí el work area todavía es el monitor entero — la boca se ubicaba abajo de todo y quedaba tapada para siempre, porque <code>monitors-changed</code> no se dispara por eso. Se sumó un listener de <code>workareas-changed</code> en <code>global.display</code>, que sí se dispara cuando el dock aparece, se va, cambia de lado o de tamaño, y reubica sola.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>Barra de progreso portada a Cairo</strong> (<code>boca-gnome/barra.js</code>), reemplazando la barra plana (dos rectángulos) que había quedado del primer port. El original en <code>boca/index.html</code> es una "barra de luz": glow que en su día ciclaba de color y latía rojo/verde en pausa — decisión ya revertida por el usuario a favor de <strong>blanco fijo</strong>, sin que el nuevo port lo supiera (el CSS viejo con el gradiente pisado seguía ahí, comentado, y se leyó por error como la referencia real).</p>
+      <p>Geometría medida con el DOM real de <code>boca/index.html</code> vía Chrome (no a ojo): la pista es transparente (<code>rgba(255,255,255,0)</code>) — la línea que se ve cruzando todo es el eje de la onda, no la barra, que se apoya encima; <code>border-radius: 100%</code> sobre una caja de 1px de alto la convierte en una elipse afinada en las puntas, no en esquinas redondeadas — con un trazo recto (primer intento) quedaba un corte a escuadra feo al arrancar la barra.</p>
+      <p>Dos bugs cazados con <code>previsualizar.js</code> antes de llegar al usuario: apilar tres elipses sólidas de alfa creciente para el glow se sumaba en modo <code>ADD</code> hasta verse como una <strong>lente gris gorda</strong>, no una línea con brillo — se cambió por un degradé vertical que se apaga hacia arriba y abajo, que sí aproxima un desenfoque real. Y un intento de agregar el halo de color alrededor de la onda entera (con <code>strokePreserve</code> sobre el contorno cerrado de cada curva) terminó pintando <strong>toda la caja</strong> del color del estado — se revirtió sin llegar a producción.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>Mover la boca con el mouse</strong> (<code>Ctrl+Alt</code> + arrastrar, <code>boca-gnome/mover.js</code>), sin perder el click-through normal. Posición guardada en <code>~/.config/tero/boca_posicion.json</code> y respetada al reiniciar (recortada al work area por si cambió la pantalla).</p>
+      <p>Dos intentos que no funcionaron, antes de dar con el que sí:</p>
+      <ul>
+        <li>Escuchar <code>captured-event</code> en <code>global.stage</code> con el actor no reactivo: el clic nunca llegaba. En Wayland, Mutter entrega los clics sobre una ventana directo al cliente, y el stage no los ve si lo que hay encima es un actor no reactivo.</li>
+        <li>Leer el puntero con <code>global.get_pointer()</code> sin consumir el clic: técnicamente movía la boca, pero <strong>la ventana de abajo también recibía el <code>Ctrl+Alt</code>+arrastre</strong> — y <code>tiling-assistant@ubuntu.com</code> usa justamente Ctrl y Alt durante un arrastre de ventana, así que la ventana de abajo se movía en cuadrícula al mismo tiempo. Reportado en vivo por el usuario ("me dejaba mover como en una cuadrícula").</li>
+      </ul>
+      <p>Solución: la boca es <code>reactive: false</code> siempre, y por encima tiene un "asa" (<code>St.Widget</code> del tamaño de toda la boca, con fondo tenue) que solo se vuelve reactiva y visible mientras <code>Ctrl+Alt</code> está apretado con el puntero encima — chequeado por polling cada 30ms sobre <code>global.get_pointer()</code>. Con fondo pintado se puede agarrar desde cualquier punto del rectángulo, no solo sobre lo que dibuja la onda (un intento intermedio, sin asa, solo funcionaba si el clic caía justo sobre la línea).</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>Aviso de carga en la boca</strong>: mientras arranca Tero muestra "Cargando transcripción/voz/modelo de lenguaje · N%" en el mismo lugar del nombre de la canción, y "Tero apagado" si se pierde la conexión con el daemon (antes se quedaba muda). El porcentaje es por etapa, no una medición real — ni Whisper, ni Piper, ni Ollama informan avance mientras cargan.</p>
+      <p><code>boca/server.py</code> guarda el último aviso de carga y se lo manda a quien se conecte a mitad de camino, porque la boca de GNOME arranca con la sesión y puede conectarse en cualquier punto del arranque del daemon. <code>enlace.js</code> avisa cambios de conexión (no cada reintento fallido) para poder mostrar "Tero apagado" sin ruido.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>Tras reiniciar la máquina completa, <strong>el cerebro dejó de responder</strong>: todo pedido daba "Se colgó el modelo local: timed out". Causa: la primera consulta después de reiniciar tarda más que los 10s de timeout de una consulta normal — no por cargar el modelo (3,3s medido), sino por procesar por primera vez el prompt del sistema más el catálogo de herramientas (~2300 tokens) sin nada en caché y con parte del modelo en CPU. Al cortarse la conexión, Ollama <strong>aborta lo que estaba haciendo</strong> ("client connection closed before llama-server finished loading, aborting load"), y la consulta siguiente empezaba de cero y se volvía a cortar — un bucle que nunca se destrababa solo.</p>
+      <p>Fix en <code>cerebro/router.py</code>: <code>precargar()</code>, llamada al arrancar (y antes de cada consulta si el modelo se descargó por inactividad), hace un calentamiento con el <strong>mismo</strong> system prompt y las mismas herramientas — no un prompt vacío, que solo carga el modelo sin dejar el prefijo en caché — con un cliente aparte y timeout de 180s. <code>main.py</code>/<code>./tero</code> ahora muestran el paso "Cargando el modelo de lenguaje" y "Todo listo" recién sale cuando el cerebro puede responder de verdad.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p><strong>"Poné música" a veces no ponía música, y el cerebro contestaba en texto en vez de ejecutar la herramienta.</strong> Causa: Whisper transcribió mal un pedido ("Poné música" → "Buena música."), el modelo contestó "perfecto" sin usar ninguna herramienta, y ese intercambio de puro texto quedó en el historial corto de 2 turnos — enseñándole al modelo que a un pedido de música se le contesta escribiendo. Medido repitiendo "Poné música." 20 veces: <strong>20/20 tool calls sin ese turno en el historial, 13/20 con él</strong> (las otras 7 veces el modelo decía en voz alta <em>"reproducir_musica_aleatoria"</em> en vez de llamarla).</p>
+      <p>Fix en <code>cerebro/router.py</code>: el historial pasa a guardar <strong>solo los turnos que usaron alguna herramienta</strong> — los de charla no aportan nada después y son justo los que envenenan el siguiente pedido. "Pausala" después de "Poné Metallica" sigue funcionando 20/20.</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><code>reproducir_musica_aleatoria</code> (<code>herramientas/musica.py</code>) ahora distingue el estado real de Spotify en vez de relanzar random siempre: si ya está sonando algo, no toca nada; si hay algo cargado en pausa, le da <em>play</em> a eso (<code>/me/player/play</code> sin cuerpo retoma en vez de reemplazar la cola); solo si no hay nada cargado elige de "Tus me gusta". La espera para que Spotify aparezca como dispositivo tras abrirlo subió de 10s a 25s (medido en frío: hasta ~6s recién abierto, y había fallado alguna vez con el valor viejo recién logueada la sesión), y sus warnings de GTK dejaron de mezclarse en <code>logs/tero.log</code> (<code>subprocess.Popen</code> con descriptores propios en vez de heredar los del daemon).</p>
+    </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">feature</span></div>
+      <p><strong>STT híbrido: Groq online primero, Whisper local de respaldo</strong> (<code>voz/stt.py</code>, reescrito). Decisión de fondo, charlada con el usuario: lo que le importa no es el conocimiento general del modelo, es que Tero entienda frases libres ("abrí Spotify y poné Fito", no comandos fijos) — y eso depende de escuchar bien, no de razonar bien. Un pedido mal transcripto no le da ninguna chance al cerebro (ver entrada de arriba).</p>
+      <p><code>GroqSTT</code> llama a <code>whisper-large-v3</code> vía la API de Groq (mismo modelo y precisión que el local, plan gratis sin tarjeta) en cada pedido; si falla (sin key, sin red, límite alcanzado con 429, error del servidor), <code>STTHibrido</code> cae a <code>LocalSTT</code> — cargado recién ahí, nunca al arrancar — respetando el <code>Retry-After</code> de un 429 o un cooldown de 20s por defecto antes de reintentar Groq. Al volver, suelta la referencia al modelo local para liberar la VRAM. <code>main.py</code> suma <code>_decir()</code> para avisar el cambio de modo por voz ("Pasando a modo offline, esperá que cargo Whisper" / "Volví a modo online") sin pasar por el cerebro.</p>
+      <p>Límites del plan gratis de Groq verificados en su documentación oficial: 2000 pedidos/día, 20/min, 8h de audio/día — muy por encima de lo que genera un push-to-talk personal, así que el respaldo local queda para cortes de Internet reales, no para el uso normal. Se activó <strong>Zero Data Retention (Global ZDR)</strong> en la cuenta para que Groq no retenga el audio.</p>
+      <p>Consecuencia medida, no buscada a propósito: con Whisper sin cargar en el uso normal, el modelo de lenguaje (Qwen3 4B) pasó de <strong>78% GPU / 22% CPU a 100% GPU</strong>, y la VRAM en reposo bajó de ~3,7GB a <strong>0 MB</strong>. Resuelve por otro camino el pendiente de rendimiento que venía anotado ("cuantizar Whisper a int8 para que el cerebro entre entero en la GPU") — sigue existiendo solo para el caso en que Whisper local entra como respaldo.</p>
+      <p>Probado: <code>GroqSTT</code> contra la API real (audio sintetizado con el propio Piper de Tero); la máquina de estados offline/local/vuelta-a-online con <code>unittest.mock</code>; el fallback real a Whisper local (large-v3 int8, sin mocks) transcribiendo bien; el arranque real del daemon en modo Groq confirmando por <code>nvidia-smi</code> que Whisper no toca la GPU y, por el WebSocket de la boca, que llegan los avisos de carga correctos.</p>
+    </div>
   </section>
 </main>
 </body>

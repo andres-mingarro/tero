@@ -9,6 +9,10 @@ muestreo_hz = 16000
 canales = 1
 
 [stt]
+# Con una key de Groq en ~/.config/tero/groq_key (ver voz/stt.py), esto es
+# solo el respaldo offline: se carga recién si Groq falla, no al arrancar.
+# Sin key, es la transcripción de siempre, y se carga al arrancar.
+#
 # "large-v3": preferimos precisión sobre latencia. El problema de nombres
 # mal entendidos no es de una ciudad puntual, va a aparecer todo el tiempo
 # con cualquier nombre propio — mejor resolverlo de raíz que a pistas.

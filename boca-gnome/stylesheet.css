@@ -1,0 +1,42 @@
+/* Mismos valores que el CSS de boca/index.html, para que el aspecto no
+   cambie al migrar desde la boca de pywebview. */
+
+.tero-boca-cancion {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  text-align: center;
+}
+
+.tero-boca-progreso {
+  spacing: 6px;
+}
+
+.tero-boca-tiempo {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 9px;
+  min-width: 26px;
+}
+
+/* La barra de progreso no está acá: se dibuja con Cairo en barra.js,
+   porque el glow y el latido del CSS original necesitan drop-shadow y
+   keyframes, y el subconjunto de CSS de St no tiene ninguno de los dos. */
+
+/* El asa para mover la boca (mover.js). Solo existe mientras Ctrl+Alt
+   está apretado con el puntero encima. El fondo no es decorativo: sin un
+   fondo pintado el clic solo cuenta sobre lo dibujado (la línea de la
+   onda), y hay que acertarle al píxel. De paso avisa que ya se puede
+   arrastrar. */
+.tero-boca-asa {
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+}
+
+/* "Cargando voz · 33%" / "Tero apagado": mismo lugar y tamaño que el
+   nombre de la canción, un poco más tenue porque es un aviso, no algo que
+   se esté reproduciendo. */
+.tero-boca-aviso {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  text-align: center;
+}

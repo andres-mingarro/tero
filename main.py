@@ -47,7 +47,7 @@ from cerebro.router import Cerebro
 from herramientas import musica
 from herramientas._ducking import Ducker
 from plataforma import crear_plataforma
-from voz.stt import STT
+from voz.stt import LocalSTT, STTHibrido, groq_configurado
 from voz.tts import TTS
 
 RUTA_CONFIG = Path(__file__).parent / "config.toml"
@@ -114,14 +114,43 @@ class Tero:
         self._grabador = Grabador(
             config["audio"]["muestreo_hz"], config["audio"]["canales"], on_nivel=self._nivel_boca
         )
-        print("Cargando modelo de transcripción...")
-        self._stt = STT(**config["stt"])
+        # La boca primero, antes que los modelos: así puede mostrar en qué
+        # etapa del arranque va, en vez de quedarse dibujando una onda que
+        # parece lista y no responde.
+        self._boca = self._crear_boca()
+        # Antes de tocar self._stt/_tts: _decir() (el aviso hablado de
+        # Groq <-> local) pasa por _estado_boca(), que necesita las dos.
+        self._estado_voz = "idle"
+        self._ducker = Ducker()
+
+        if groq_configurado():
+            # Ni se carga Whisper acá: con Groq de por medio, el uso
+            # normal de un push-to-talk personal ni se acerca al límite
+            # del plan gratis (2000 pedidos/día), así que Whisper local
+            # queda de respaldo para cuando falla Internet, cargado recién
+            # la primera vez que hace falta -- ver voz/stt.py.
+            self._carga_boca("Transcripción por Groq (online)", 0.0)
+            self._stt = STTHibrido(
+                config["stt"], on_aviso=self._decir, on_carga=self._carga_boca,
+                muestreo_hz=config["audio"]["muestreo_hz"],
+            )
+            print("STT: Groq online, Whisper local de respaldo si hace falta.")
+        else:
+            self._carga_boca("Cargando transcripción", 0.0)
+            print("Cargando modelo de transcripción...")
+            self._stt = LocalSTT(**config["stt"])
+        self._carga_boca("Cargando voz", 1 / 3)
         print("Cargando voz...")
         self._tts = TTS(**config["tts"])
         self._cerebro = Cerebro(**config["cerebro"])
-        self._boca = self._crear_boca()
-        self._estado_voz = "idle"
-        self._ducker = Ducker()
+        # Antes de decir "escuchando": recién reiniciada la máquina, cargar
+        # el modelo lleva más que el timeout de una consulta (ver
+        # cerebro/router.py), y el primer pedido fallaba con "se colgó el
+        # modelo local".
+        self._carga_boca("Cargando modelo de lenguaje", 2 / 3)
+        print("Cargando modelo de lenguaje...")
+        self._cerebro.precargar()
+        self._carga_boca(None)
         self._monitor_audio = self._crear_monitor_audio()
         self._motivo_corte: str | None = None
         self._monitor_salud = salud.MonitorSalud(
@@ -150,6 +179,10 @@ class Tero:
             print(f"(boca no disponible: {error})")
             return None
 
+    def _carga_boca(self, texto: str | None, progreso: float = 0.0) -> None:
+        if self._boca is not None:
+            self._boca.carga(texto, progreso)
+
     def _crear_monitor_audio(self) -> MonitorAudioSistema | None:
         # Igual que la boca: opcional, el daemon tiene que andar sin esto.
         try:
@@ -174,6 +207,14 @@ class Tero:
             self._ducker.desactivar()
         if self._boca is not None:
             self._boca.estado(nombre)
+
+    def _decir(self, texto: str) -> None:
+        """Habla un aviso fuera del flujo normal de turno (ej. Groq <-> Whisper
+        local), sin pasar por el cerebro ni por una grabación del usuario."""
+        anterior = self._estado_voz
+        self._estado_boca("hablando")
+        self._tts.hablar(texto, on_nivel=self._nivel_boca)
+        self._estado_boca(anterior)
 
     def _nivel_musica_boca(self, nivel: float) -> None:
         # Solo si Tero no está en medio de escuchar/pensar/hablar -- eso
