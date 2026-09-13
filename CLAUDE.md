@@ -242,10 +242,20 @@ Notas por herramienta:
   El agente con Playwright se reserva solo para lo que no se puede
   parametrizar por URL. `buscar_en_sitio` generaliza esto a mercadolibre/
   google/youtube/amazon/maps.
-- **Terminal**: en Linux, `tmux capture-pane` si la sesión corre dentro de
-  tmux; si no, portapapeles (`wl-paste`/`xclip`). En este entorno de
-  desarrollo no hay tmux instalado, así que hoy el camino real es
-  portapapeles.
+- **Terminal**: sin tmux a propósito (el usuario no quiere cambiar cómo
+  labura por esto). Se lee por **AT-SPI** (accesibilidad de escritorio,
+  `herramientas/_leer_terminal_atspi.py`, corrido con el Python del
+  sistema por subprocess porque PyGObject no está en el venv) si la
+  ventana activa en ese instante expone un nodo de rol "terminal" — el
+  caso de las terminales nativas de GTK/Qt (`ptyxis`, GNOME Terminal,
+  Konsole). Verificado en vivo: funciona sin que el usuario copie nada.
+  Las terminales de motor gráfico propio (Warp, Alacritty, Kitty) ni
+  aparecen en el árbol de accesibilidad — probado con Warp, no aparece.
+  Para esas, respaldo por **selección primaria** (`wl-paste --primary`/
+  `xclip -selection primary`) — lo resaltado con el mouse, sin Ctrl+C. A
+  propósito **no** se revisa el portapapeles de Ctrl+C: el usuario puede
+  tener algo copiado ahí para otra cosa y no quiere que Tero se lo lleve
+  puesto.
 
 ### `delegar_a_codex`
 
@@ -403,8 +413,10 @@ que `./tero` distingue de una caída de verdad.
    Lección para el futuro: si el modelo chico empieza a portarse mal,
    sospechar primero de lo que Tero le está metiendo en el contexto,
    antes de culpar al sampling o de agregar otra regla al prompt.
-3. **Contexto** — ventana activa, portapapeles, captura bajo demanda.
-   No arrancado.
+3. **Contexto** — captura bajo demanda. `leer_terminal` migrado a AT-SPI
+   ✅ (ver Herramientas), sin ventana activa expuesta como dato aparte —
+   se usa internamente solo para saber qué está enfocado, no se muestra
+   a ningún lado. Falta `capturar_pantalla`.
 4. **Codex** — la rama pesada. No arrancado.
 5. **Soul-connector** ✅ — overlay con WebSocket, ver sección dedicada más arriba.
 6. **Linux** ✅ — `plataforma/linux.py` ya existe y funciona (desarrollo
@@ -413,11 +425,8 @@ que `./tero` distingue de una caída de verdad.
 
 Estado actual: **fases 1, 2, 5 y 6 completas y commiteadas.** Pendiente
 para retomar:
-- Fase 3 (Contexto) es el próximo paso lógico del plan original, todavía
-  sin arrancar.
-- `capturar_pantalla` depende de fase 3 (`Plataforma.capturar_pantalla`).
-- No hay `tmux` instalado en este entorno, así que `leer_terminal` cae
-  siempre al portapapeles — no probado el camino de tmux.
+- Fase 3 (Contexto): `leer_terminal` ya migrado a AT-SPI (2026-09-13).
+  Falta `capturar_pantalla` (depende de `Plataforma.capturar_pantalla`).
 - `delegar_a_codex` (fase 4) sigue sin arrancar.
 
 ---
