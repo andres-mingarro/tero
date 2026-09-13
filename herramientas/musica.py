@@ -72,18 +72,59 @@ def estado_reproduccion() -> dict | None:
         return None
 
 
+# Cuánto se espera a que Spotify aparezca como dispositivo después de
+# abrirlo. Medido con el snap: ~6s en caliente. Recién después del login,
+# con el disco sin cachear, tarda bastante más -- con la espera vieja de 10s
+# llegó a fallar con "ni abriendo la app". Se consulta cada segundo, así
+# que en el caso normal no se espera de más.
+_ESPERA_APERTURA_S = 25
+
+
+def _abrir_spotify() -> None:
+    # Spotify hereda los descriptores de quien lo abre: sin DEVNULL escribe
+    # sus warnings de GTK adentro de logs/tero.log, y con start_new_session
+    # no queda colgado del proceso del daemon.
+    subprocess.Popen(
+        ["xdg-open", "spotify:"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 def _asegurar_dispositivo() -> str | None:
-    """Dispositivo activo de Spotify Connect, abriendo la app y
-    reintentando con backoff si no hay ninguno visible todavía."""
+    """Dispositivo activo de Spotify Connect, abriendo la app si no hay
+    ninguno visible todavía."""
     device_id = _dispositivo_activo()
     if device_id is None:
-        subprocess.run(["xdg-open", "spotify:"], check=False)
-        for espera in (2, 2, 3, 3):
-            time.sleep(espera)
+        _abrir_spotify()
+        for _ in range(_ESPERA_APERTURA_S):
+            time.sleep(1)
             device_id = _dispositivo_activo()
             if device_id is not None:
                 break
     return device_id
+
+
+def _estado_player() -> dict | None:
+    """Estado de reproducción, o None si no hay nada cargado (204). Recién
+    abierta la app también da 204: así se distingue "lo acabo de abrir" de
+    "estaba abierto con algo en pausa"."""
+    respuesta = httpx.get(f"{_API}/me/player", headers=_headers(), timeout=10.0)
+    if respuesta.status_code == 204 or not respuesta.content:
+        return None
+    respuesta.raise_for_status()
+    return respuesta.json()
+
+
+def _reanudar(device_id: str) -> None:
+    # /me/player/play sin cuerpo retoma lo que estaba cargado, en vez de
+    # reemplazar la cola.
+    respuesta = httpx.put(
+        f"{_API}/me/player/play", params={"device_id": device_id}, headers=_headers(), timeout=10.0
+    )
+    respuesta.raise_for_status()
 
 
 def _reproducir_uris(uris: list[str], device_id: str) -> None:
@@ -154,18 +195,29 @@ def reproducir_musica(busqueda: str) -> str:
 
 @herramienta
 def reproducir_musica_aleatoria() -> str:
-    """Elige varias canciones al azar de "Tus me gusta" (favoritos) del
-    usuario en Spotify y las pone en cola, empezando por una de ellas.
-    Usar para pedidos genéricos de música que NO nombran artista/canción/
-    álbum (ej. "poné música", "poné algo", "poné alguna canción") -- no
-    repite siempre lo último que sonó, y "siguiente" tiene a dónde ir."""
-    tracks = _favoritos_aleatorios(15)
-    if not tracks:
-        return "La herramienta 'reproducir_musica_aleatoria' falló: no tenés canciones en 'Tus me gusta' en Spotify."
-
+    """Pone música en Spotify. Usar para pedidos genéricos de música que NO
+    nombran artista/canción/álbum (ej. "poné música", "poné algo", "poné
+    alguna canción"). Abre Spotify si está cerrado. Si tenía algo en pausa,
+    le da play a eso; si no había nada cargado, pone canciones al azar de
+    "Tus me gusta" (favoritos) del usuario."""
     device_id = _asegurar_dispositivo()
     if device_id is None:
         return "La herramienta 'reproducir_musica_aleatoria' falló: no hay ningún dispositivo de Spotify activo, ni abriendo la app."
+
+    # "Poné música" con Spotify abierto y en pausa es "dale play", no
+    # "cambiame lo que estaba escuchando por otra cosa".
+    player = _estado_player()
+    item = (player or {}).get("item")
+    if player and player.get("is_playing"):
+        return "Ya estaba sonando música, no cambié nada."
+    if item:
+        _reanudar(device_id)
+        artista = item["artists"][0]["name"] if item.get("artists") else "?"
+        return f"Reanudando {item['name']!r} de {artista}."
+
+    tracks = _favoritos_aleatorios(15)
+    if not tracks:
+        return "La herramienta 'reproducir_musica_aleatoria' falló: no tenés canciones en 'Tus me gusta' en Spotify."
 
     _reproducir_uris([t["uri"] for t in tracks], device_id)
     primero = tracks[0]
@@ -200,7 +252,7 @@ def control_media(accion: Literal["reproducir", "pausar", "siguiente", "anterior
         # "No player could handle this command": no hay ningún reproductor
         # con sesión MPRIS activa, probablemente porque Spotify ni está
         # abierto. Se abre (igual que en reproducir_musica) y se reintenta.
-        subprocess.run(["xdg-open", "spotify:"], check=False)
+        _abrir_spotify()
         for espera in (2, 2, 3, 3):
             time.sleep(espera)
             resultado = _playerctl(accion)

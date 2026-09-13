@@ -128,6 +128,7 @@ PID_DAEMON=$!
 
 hito_stt=0
 hito_tts=0
+hito_llm=0
 listo=0
 for _ in $(seq $((ESPERA_DAEMON_S * 2))); do
   if ! kill -0 "$PID_DAEMON" 2>/dev/null; then
@@ -141,6 +142,9 @@ for _ in $(seq $((ESPERA_DAEMON_S * 2))); do
   if [ $hito_tts -eq 0 ] && grep -q "Cargando voz" "$LOG"; then
     hito_tts=1; ok "Modelo de transcripción cargado"; paso "Cargando la voz"
   fi
+  if [ $hito_llm -eq 0 ] && grep -q "Cargando modelo de lenguaje" "$LOG"; then
+    hito_llm=1; ok "Voz cargada"; paso "Cargando el modelo de lenguaje (recién reiniciada la máquina tarda)"
+  fi
   if grep -q "Tero escuchando" "$LOG"; then listo=1; break; fi
   sleep 0.5
 done
@@ -150,7 +154,7 @@ if [ $listo -eq 0 ]; then
   tail -n 15 "$LOG" | sed 's/^/      /'
   exit 1
 fi
-ok "Voz cargada"
+ok "Modelo de lenguaje cargado"
 TECLA=$(grep -m1 "Tero escuchando" "$LOG" | sed 's/.*Mantené \(.*\) para hablar.*/\1/')
 ok "Daemon escuchando${TECLA:+ (tecla: $TECLA)}"
 

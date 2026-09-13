@@ -114,12 +114,25 @@ class Tero:
         self._grabador = Grabador(
             config["audio"]["muestreo_hz"], config["audio"]["canales"], on_nivel=self._nivel_boca
         )
+        # La boca primero, antes que los modelos: así puede mostrar en qué
+        # etapa del arranque va, en vez de quedarse dibujando una onda que
+        # parece lista y no responde.
+        self._boca = self._crear_boca()
+        self._carga_boca("Cargando transcripción", 0.0)
         print("Cargando modelo de transcripción...")
         self._stt = STT(**config["stt"])
+        self._carga_boca("Cargando voz", 1 / 3)
         print("Cargando voz...")
         self._tts = TTS(**config["tts"])
         self._cerebro = Cerebro(**config["cerebro"])
-        self._boca = self._crear_boca()
+        # Antes de decir "escuchando": recién reiniciada la máquina, cargar
+        # el modelo lleva más que el timeout de una consulta (ver
+        # cerebro/router.py), y el primer pedido fallaba con "se colgó el
+        # modelo local".
+        self._carga_boca("Cargando modelo de lenguaje", 2 / 3)
+        print("Cargando modelo de lenguaje...")
+        self._cerebro.precargar()
+        self._carga_boca(None)
         self._estado_voz = "idle"
         self._ducker = Ducker()
         self._monitor_audio = self._crear_monitor_audio()
@@ -149,6 +162,10 @@ class Tero:
         except Exception as error:
             print(f"(boca no disponible: {error})")
             return None
+
+    def _carga_boca(self, texto: str | None, progreso: float = 0.0) -> None:
+        if self._boca is not None:
+            self._boca.carga(texto, progreso)
 
     def _crear_monitor_audio(self) -> MonitorAudioSistema | None:
         # Igual que la boca: opcional, el daemon tiene que andar sin esto.
