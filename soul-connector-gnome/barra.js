@@ -1,5 +1,5 @@
-// Port a Cairo de la barra de progreso de boca/index.html (el reproductor
-// de la boca de pywebview), con una diferencia pedida a propósito: acá es
+// Port a Cairo de la barra de progreso de soul_connector/index.html (el reproductor
+// del soul-connector de pywebview), con una diferencia pedida a propósito: acá es
 // **siempre blanca**. El original cicla el color del glow cada 4s y en
 // pausa late en rojo/verde; esta versión no cambia de tono nunca, así que
 // lo único que se mueve es el brillo.

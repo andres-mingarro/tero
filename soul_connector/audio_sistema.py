@@ -1,5 +1,5 @@
 """Escucha el audio del sistema (lo que sale por el sink activo, vía su
-monitor de PipeWire) para que la boca reaccione a lo que está sonando de
+monitor de PipeWire) para que el soul-connector reaccione a lo que está sonando de
 verdad en la compu -- música de Spotify, un video, lo que sea -- no solo
 cuando Tero habla.
 
@@ -41,7 +41,7 @@ def _indice_monitor(nombre_sink: str) -> int | None:
 
 class MonitorAudioSistema:
     """Corre en un hilo aparte. Llama a on_nivel(rms) mientras hay señal,
-    y a on_silencio() cuando no hay nada sonando (para que la boca sepa
+    y a on_silencio() cuando no hay nada sonando (para que el soul-connector sepa
     distinguir "no hay música" de "hay música pero está en un pasaje
     tranquilo")."""
 

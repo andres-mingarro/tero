@@ -9,7 +9,7 @@ from piper import PiperVoice
 
 RUTA_MODELOS = Path(__file__).parent / "modelos"
 
-_VENTANA_NIVEL_S = 0.05  # cada cuánto se reporta un nivel de audio (boca)
+_VENTANA_NIVEL_S = 0.05  # cada cuánto se reporta un nivel de audio (soul-connector)
 
 
 class TTS:
@@ -24,7 +24,7 @@ class TTS:
 
     def hablar(self, texto: str, on_nivel: Callable[[float], None] | None = None) -> None:
         """on_nivel: callback opcional, RMS (0-1 aprox) cada _VENTANA_NIVEL_S
-        segundos durante la reproducción -- lo usa la boca para animarse."""
+        segundos durante la reproducción -- lo usa el soul-connector para animarse."""
         for trozo in self._voz.synthesize(texto):
             audio = trozo.audio_float_array
             if on_nivel is None:

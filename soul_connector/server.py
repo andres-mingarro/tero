@@ -1,7 +1,7 @@
-"""Servidor WebSocket de la boca: difunde estado (idle/escuchando/pensando/
+"""Servidor WebSocket del soul-connector: difunde estado (idle/escuchando/pensando/
 hablando) y nivel de audio (RMS) a quien esté conectado.
 
-El daemon tiene que funcionar sin la boca (ver README de la fase): si no
+El daemon tiene que funcionar sin el soul-connector (ver README de la fase): si no
 hay ningún cliente conectado, o si el servidor ni siquiera pudo arrancar
 (puerto ocupado, etc.), emitir un estado/nivel no hace nada — nunca
 lanza, nunca bloquea el resto de Tero.
@@ -16,13 +16,13 @@ import websockets
 PUERTO = 8765
 
 
-class ServidorBoca:
+class ServidorSoulConnector:
     def __init__(self, puerto: int = PUERTO):
         self._puerto = puerto
         self._clientes: set = set()
         # El último aviso de carga, para mandárselo a quien se conecte a
-        # mitad de camino: la boca de GNOME arranca con la sesión y se
-        # conecta sola en cualquier momento del arranque del daemon, y sin
+        # mitad de camino: el soul-connector de GNOME arranca con la sesión y se
+        # conecta solo en cualquier momento del arranque del daemon, y sin
         # esto se quedaba sin saber que Tero todavía estaba cargando.
         self._carga_actual: dict | None = None
         self._loop = asyncio.new_event_loop()
@@ -40,7 +40,7 @@ class ServidorBoca:
     async def _servir(self) -> None:
         async def manejar(ws) -> None:
             self._clientes.add(ws)
-            print("(boca: cliente conectado)")
+            print("(soul-connector: cliente conectado)")
             if self._carga_actual is not None:
                 try:
                     await ws.send(json.dumps({"carga": self._carga_actual}))
@@ -50,13 +50,13 @@ class ServidorBoca:
                 await ws.wait_closed()
             finally:
                 self._clientes.discard(ws)
-                print("(boca: cliente desconectado)")
+                print("(soul-connector: cliente desconectado)")
 
         try:
             await websockets.serve(manejar, "127.0.0.1", self._puerto)
         except OSError:
             # Puerto ocupado (ej. otra instancia del daemon corriendo):
-            # la boca simplemente no tiene con quién hablar, no es fatal.
+            # el soul-connector simplemente no tiene con quién hablar, no es fatal.
             pass
 
     def _difundir(self, mensaje: dict) -> None:
@@ -85,7 +85,7 @@ class ServidorBoca:
 
     def cancion(self, info: dict | None) -> None:
         """info: {"texto", "progreso_ms", "duracion_ms"} o None si no suena
-        nada. La boca interpola el progreso entre actualizaciones."""
+        nada. El soul-connector interpola el progreso entre actualizaciones."""
         self._difundir({"cancion": info})
 
     def carga(self, texto: str | None, progreso: float = 0.0) -> None:

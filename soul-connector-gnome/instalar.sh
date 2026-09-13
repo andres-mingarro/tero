@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instala la boca como extensión de GNOME Shell.
+# Instala el soul-connector como extensión de GNOME Shell.
 #
 # No copia nada: hace un symlink desde ~/.local/share/gnome-shell/extensions
 # a esta carpeta del repo. Así editar el código acá es editar la extensión
@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-UUID="boca@tero.local"
+UUID="soul-connector@tero.local"
 ORIGEN="$(dirname "$(readlink -f "$0")")"
 DESTINO="$HOME/.local/share/gnome-shell/extensions/$UUID"
 

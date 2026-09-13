@@ -49,10 +49,10 @@ def _dispositivo_activo() -> str | None:
 def estado_reproduccion() -> dict | None:
     """Qué suena en Spotify ahora (texto, progreso y duración en ms), o
     None si no hay nada cargado. Si está en pausa, sigue devolviendo el
-    dict (con reproduciendo=False) en vez de None -- la boca lo muestra
+    dict (con reproduciendo=False) en vez de None -- el soul-connector lo muestra
     distinto (en rojo, sin avanzar el progreso) en vez de ocultar todo
     como si no hubiera nada. No es una herramienta del modelo -- la usa
-    la boca para mostrar debajo de la onda qué está sonando."""
+    el soul-connector para mostrar debajo de la onda qué está sonando."""
     try:
         respuesta = httpx.get(f"{_API}/me/player/currently-playing", headers=_headers(), timeout=5.0)
         if respuesta.status_code != 200 or not respuesta.content:

@@ -148,7 +148,7 @@ class STTHibrido:
         al cruzar de online a offline y de vuelta -- nunca en cada
         pedido, solo en el cambio de modo.
     on_carga(texto | None, progreso): mismo protocolo que usa main.py al
-        arrancar, para que la boca muestre "Cargando transcripción..."
+        arrancar, para que el soul-connector muestre "Cargando transcripción..."
         mientras se carga el modelo local por primera vez.
     """
 

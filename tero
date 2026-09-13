@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Levanta Tero completo: daemon + boca. Ctrl+C corta los dos.
+# Levanta Tero completo: daemon + soul-connector. Ctrl+C corta los dos.
 #
 # Verifica las dependencias externas antes de arrancar (Ollama, el modelo,
 # token de Spotify, binarios de sistema) en vez de dejar que cada una
@@ -16,11 +16,11 @@ cd "$(dirname "$(readlink -f "$0")")" || exit 1
 
 DIR_LOGS="logs"
 LOG="$DIR_LOGS/tero.log"
-LOG_BOCA="$DIR_LOGS/boca.log"
+LOG_SOUL_CONNECTOR="$DIR_LOGS/soul_connector.log"
 LOCK="$DIR_LOGS/.lock"
 
 ESPERA_DAEMON_S=180 # la primera vez Whisper se baja de HuggingFace
-ESPERA_BOCA_S=30
+ESPERA_SOUL_CONNECTOR_S=30
 
 mkdir -p "$DIR_LOGS"
 
@@ -38,7 +38,7 @@ aviso() { printf '  %s!%s %s\n' "$C_AVISO" "$C_FIN" "$1"; _a_log "aviso: $1"; }
 error() { printf '  %s✗%s %s\n' "$C_MAL" "$C_FIN" "$1";   _a_log "ERROR: $1"; }
 
 PID_DAEMON=""
-PID_BOCA=""
+PID_SOUL_CONNECTOR=""
 PID_TAIL=""
 YA_MATE=0
 
@@ -51,14 +51,14 @@ matar() {
   # El tail primero: `wait` de abajo se cuelga para siempre si sigue vivo
   # (es un hijo más del script, y `tail -f` no termina solo).
   [ -n "$PID_TAIL" ] && kill -TERM "$PID_TAIL" 2>/dev/null
-  for pid in "$PID_BOCA" "$PID_DAEMON"; do
+  for pid in "$PID_SOUL_CONNECTOR" "$PID_DAEMON"; do
     [ -n "$pid" ] || continue
     # Al hijo real (python) además del padre: `uv run` es un wrapper y
     # matarlo solo a él puede dejar el python huérfano y vivo.
     pkill -TERM -P "$pid" 2>/dev/null
     kill -TERM "$pid" 2>/dev/null
   done
-  wait "$PID_DAEMON" "$PID_BOCA" 2>/dev/null
+  wait "$PID_DAEMON" "$PID_SOUL_CONNECTOR" 2>/dev/null
   _a_log "Tero cortado."
   printf '%sChau.%s\n' "$C_TENUE" "$C_FIN"
 }
@@ -174,45 +174,46 @@ ok "Modelo de lenguaje cargado"
 TECLA=$(grep -m1 "Tero escuchando" "$LOG" | sed 's/.*Mantené \(.*\) para hablar.*/\1/')
 ok "Daemon escuchando${TECLA:+ (tecla: $TECLA)}"
 
-# --- boca -----------------------------------------------------------------
+# --- soul-connector ---------------------------------------------------------------
 # Cliente opcional: si no levanta, el daemon sigue andando igual (es una
 # regla del proyecto, no una casualidad). Por eso acá nunca se sale con
 # error, solo se avisa.
 
-# Si está puesta la boca-extensión de GNOME (boca-gnome/), ya hay una boca
-# dibujándose adentro de gnome-shell: levantar además la de pywebview
-# pondría dos ondas superpuestas, y la pesada de las dos.
-if gnome-extensions list --enabled 2>/dev/null | grep -q "^boca@tero.local$"; then
-  ok "Boca: usando la extensión de GNOME (no hace falta la de pywebview)"
-  BOCA_POR_EXTENSION=1
+# Si está puesto el soul-connector como extensión de GNOME
+# (soul-connector-gnome/), ya hay uno dibujándose adentro de gnome-shell:
+# levantar además el de pywebview pondría dos ondas superpuestas, y la
+# pesada de las dos.
+if gnome-extensions list --enabled 2>/dev/null | grep -q "^soul-connector@tero.local$"; then
+  ok "Soul-connector: usando la extensión de GNOME (no hace falta la de pywebview)"
+  SOUL_CONNECTOR_POR_EXTENSION=1
 else
-  BOCA_POR_EXTENSION=0
+  SOUL_CONNECTOR_POR_EXTENSION=0
 fi
 
-if [ $BOCA_POR_EXTENSION -eq 0 ]; then
-paso "Arrancando la boca (overlay)"
-: >"$LOG_BOCA"
-QT_QPA_PLATFORM=xcb uv run python -m boca.ventana >>"$LOG_BOCA" 2>&1 &
-PID_BOCA=$!
+if [ $SOUL_CONNECTOR_POR_EXTENSION -eq 0 ]; then
+paso "Arrancando el soul-connector (overlay)"
+: >"$LOG_SOUL_CONNECTOR"
+QT_QPA_PLATFORM=xcb uv run python -m soul_connector.ventana >>"$LOG_SOUL_CONNECTOR" 2>&1 &
+PID_SOUL_CONNECTOR=$!
 
-boca_lista=0
-for _ in $(seq $((ESPERA_BOCA_S * 2))); do
-  if ! kill -0 "$PID_BOCA" 2>/dev/null; then break; fi
-  if wmctrl -l 2>/dev/null | grep -q "tero-boca"; then boca_lista=1; break; fi
+soul_connector_listo=0
+for _ in $(seq $((ESPERA_SOUL_CONNECTOR_S * 2))); do
+  if ! kill -0 "$PID_SOUL_CONNECTOR" 2>/dev/null; then break; fi
+  if wmctrl -l 2>/dev/null | grep -q "tero-soul-connector"; then soul_connector_listo=1; break; fi
   sleep 0.5
 done
 
-if [ $boca_lista -eq 1 ]; then
-  ok "Boca en pantalla"
+if [ $soul_connector_listo -eq 1 ]; then
+  ok "Soul-connector en pantalla"
 else
-  aviso "La boca no levantó (el daemon sigue andando igual). Ver $LOG_BOCA"
+  aviso "El soul-connector no levantó (el daemon sigue andando igual). Ver $LOG_SOUL_CONNECTOR"
 fi
-fi  # fin del bloque de la boca de pywebview
+fi  # fin del bloque del soul-connector de pywebview
 
 # --- listo ----------------------------------------------------------------
 printf '\n  %sTodo listo.%s Ctrl+C para cortar todo.\n' "$C_OK" "$C_FIN"
-printf '  %sLog: %s  ·  boca: %s%s\n\n' "$C_TENUE" "$LOG" "$LOG_BOCA" "$C_FIN"
-_a_log "Todo listo (daemon $PID_DAEMON, boca ${PID_BOCA:-—})."
+printf '  %sLog: %s  ·  soul-connector: %s%s\n\n' "$C_TENUE" "$LOG" "$LOG_SOUL_CONNECTOR" "$C_FIN"
+_a_log "Todo listo (daemon $PID_DAEMON, soul-connector ${PID_SOUL_CONNECTOR:-—})."
 
 # Log en vivo del daemon, que es lo que interesa mirar mientras se usa.
 tail -n 0 -f "$LOG" &

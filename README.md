@@ -5,8 +5,9 @@ segundo plano; el micrófono se abre solo mientras se mantiene apretada una
 tecla dedicada (por defecto, **Control derecho**).
 
 - Push-to-talk, sin wake word.
-- 80% del procesamiento corre local (Whisper, Ollama, Piper) — sin cuota,
-  sin depender de internet salvo para clima/música/mapas/Telegram.
+- La mayor parte del procesamiento corre local (Ollama, Piper, Whisper de
+  respaldo) — sin cuota, sin depender de internet salvo para
+  clima/música/mapas/Telegram y, opcionalmente, la transcripción (Groq).
 - Español rioplatense de punta a punta.
 
 Ver [`CLAUDE.md`](CLAUDE.md) para las decisiones de diseño y el estado de
@@ -53,7 +54,7 @@ sudo apt install -y libportaudio2 playerctl wmctrl \
 |---|---|
 | `libportaudio2` | Lib nativa de `sounddevice`, no viene en el wheel de PyPI |
 | `playerctl` | Control de reproducción (play/pausa/siguiente) vía MPRIS |
-| `wmctrl`, `libxcb-cursor0`, `libxcb-icccm4`, `libxcb-keysyms1` | Solo si vas a usar la boca (overlay) — ver más abajo |
+| `wmctrl`, `libxcb-cursor0`, `libxcb-icccm4`, `libxcb-keysyms1` | Solo para el soul-connector **clásico** (overlay pywebview) — ver "El soul-connector" más abajo. El soul-connector como extensión de GNOME no los necesita |
 
 ### 3. Permisos de teclado
 
@@ -176,7 +177,9 @@ Ya viene con valores razonables. Lo más probable que quieras ajustar:
 - `[tecla] nombre` — cuál tecla activa la escucha (nombre evdev, ej.
   `KEY_RIGHTCTRL`, `KEY_PAUSE`).
 - `[stt] modelo` — `large-v3` (preciso, más lento) vs `medium`/`small`
-  (más rápido, se equivoca más con nombres propios).
+  (más rápido, se equivoca más con nombres propios). Con Groq configurado
+  (paso 6b), esto es solo el respaldo offline; sin Groq, es la
+  transcripción de siempre.
 
 ## Arrancar
 
@@ -186,8 +189,8 @@ Ya viene con valores razonables. Lo más probable que quieras ajustar:
 
 Levanta todo: verifica las dependencias (Ollama y el modelo, token de
 Spotify, binarios de sistema), arranca el daemon, espera a que carguen
-Whisper y la voz, abre la boca, y después muestra el log en vivo. `Ctrl+C`
-corta el daemon y la boca juntos.
+Whisper y la voz, abre el soul-connector, y después muestra el log en
+vivo. `Ctrl+C` corta el daemon y el soul-connector juntos.
 
 ```
 Tero
@@ -199,10 +202,14 @@ Tero
   … Arrancando el daemon (carga la voz; Whisper local solo si Groq falla)
   ✓ Voz cargada
   ✓ Daemon escuchando (tecla: KEY_RIGHTCTRL)
-  ✓ Boca en pantalla
+  ✓ Soul-connector: usando la extensión de GNOME (no hace falta la de pywebview)
 
   Todo listo. Ctrl+C para cortar todo.
 ```
+
+(La última línea depende de cuál detecte: `Soul-connector en pantalla` si
+usa el clásico, o un aviso si no levantó ninguno de los dos — nunca corta
+el arranque, el soul-connector siempre es opcional.)
 
 Se niega a arrancar si ya hay otro Tero corriendo: dos daemons cargan dos
 veces Whisper `large-v3` en la GPU y el segundo muere con `CUDA failed
@@ -210,8 +217,9 @@ with error out of memory`.
 
 Los logs quedan en `logs/` (ignorado por git): `tero.log` tiene el arranque
 paso a paso más la salida del daemon (transcripción, qué herramienta se
-llamó, tiempos de cada etapa), `boca.log` el ruido de la ventana. Cada
-corrida empieza un log nuevo y conserva el anterior como `.1`.
+llamó, tiempos de cada etapa), `soul_connector.log` el ruido de la
+ventana. Cada corrida empieza un log nuevo y conserva el anterior como
+`.1`.
 
 Para tenerlo a mano desde cualquier lado:
 
@@ -225,20 +233,45 @@ Para desarrollo, si querés correr solo una parte:
 
 ```bash
 uv run python main.py                          # solo el daemon
-QT_QPA_PLATFORM=xcb uv run python -m boca.ventana   # solo la boca
+QT_QPA_PLATFORM=xcb uv run python -m soul_connector.ventana   # solo el soul-connector clásico
 ```
 
-### La boca (overlay opcional)
+(El soul-connector como extensión de GNOME no se lanza así: una vez
+instalado, vive dentro de `gnome-shell` y anda solo.)
 
-Ventana flotante con una onda animada que reacciona a la voz de Tero, al
-micrófono mientras escucha, y a la música de fondo, más el nombre/progreso
-de lo que suena en Spotify (se oculta solo si queda pausado 30s). Es un
-cliente aparte, opcional — el daemon principal funciona sin ella, y `./tero`
-sigue adelante si no levanta.
+### El soul-connector (overlay opcional)
 
-El `QT_QPA_PLATFORM=xcb` (que `./tero` ya pone solo) es necesario en
-sesiones Wayland nativas (como GNOME): sin eso, la ventana no puede pedirle
-al gestor de ventanas que se quede "siempre encima" mientras habla.
+Onda animada que reacciona a la voz de Tero, al micrófono mientras
+escucha, y a la música de fondo, más el nombre/progreso de lo que suena en
+Spotify (se oculta sola si queda pausado 30s) y, mientras arranca, en qué
+etapa de carga va. Es un cliente aparte, opcional — el daemon principal
+funciona sin él, y `./tero` sigue adelante si no levanta.
+
+Hay dos implementaciones, y `./tero` detecta sola cuál usar:
+
+- **Extensión de GNOME** (`soul-connector-gnome/`, preferida si estás en
+  GNOME): corre adentro de `gnome-shell`, que ya está en memoria, así que
+  cuesta prácticamente nada (medido: por debajo del ruido de medición del
+  propio `gnome-shell`) contra ~1,3 GB de RAM del soul-connector clásico.
+  Se mueve con `Ctrl+Alt` + arrastrar. Instalación:
+
+  ```bash
+  cd soul-connector-gnome && ./instalar.sh
+  ```
+
+  Es un symlink a esta carpeta del repo + `gnome-extensions enable`. En
+  Wayland, GNOME no relee extensiones nuevas hasta reiniciar la sesión
+  (cerrar sesión y volver a entrar) — después de eso queda andando solo.
+  `./desinstalar.sh` lo saca. Detalle completo, incluidas las trampas de
+  GNOME 50, en `soul-connector-gnome/README.md`.
+
+- **Overlay clásico** (`soul_connector/`, pywebview + QtWebEngine):
+  funciona en cualquier escritorio, no solo GNOME, a cambio de esos
+  ~1,3 GB de RAM. Es el que usa `./tero` si no detecta la extensión de
+  GNOME habilitada. El `QT_QPA_PLATFORM=xcb` (que `./tero` ya pone solo)
+  es necesario en sesiones Wayland nativas: sin eso, la ventana no puede
+  pedirle al gestor de ventanas que se quede "siempre encima" mientras
+  habla.
 
 ## Herramientas disponibles
 

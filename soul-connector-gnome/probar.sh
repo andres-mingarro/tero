@@ -9,7 +9,7 @@
 #   ./probar.sh           cierra el anidado anterior y abre uno nuevo
 #   ./probar.sh --cerrar  lo cierra y listo
 #
-# Para que la boca se mueva, Tero tiene que estar corriendo (./tero).
+# Para que el soul-connector se mueva, Tero tiene que estar corriendo (./tero).
 #
 # Se lanza con `setsid` para que el anidado y todo lo que arrastra
 # (calendar-server, notificaciones, nautilus, tracker...) queden en un
@@ -18,8 +18,8 @@
 
 set -u
 DIR="${XDG_RUNTIME_DIR:-/tmp}"
-LOG="$DIR/boca-anidado.log"
-PGID_ARCHIVO="$DIR/boca-anidado.pgid"
+LOG="$DIR/soul-connector-anidado.log"
+PGID_ARCHIVO="$DIR/soul-connector-anidado.pgid"
 
 cerrar() {
   pgid=$(cat "$PGID_ARCHIVO" 2>/dev/null)
@@ -60,7 +60,7 @@ setsid env WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}" \
 echo $! >"$PGID_ARCHIVO"  # con setsid, el pid del hijo es el pgid del grupo
 
 echo "Shell anidado abierto (log: $LOG)."
-echo "La boca aparece abajo a la derecha de esa ventana."
+echo "El soul-connector aparece abajo a la derecha de esa ventana."
 
 sleep 8
 if grep -q "JS ERROR" "$LOG"; then

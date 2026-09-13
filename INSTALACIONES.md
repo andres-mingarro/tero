@@ -23,8 +23,8 @@ puro. Instalar un paquete de sistema solo cuando de verdad no hay otra.
 | Ollama | script oficial de instalación (`curl -fsSL https://ollama.com/install.sh \| sh`) | Servidor del modelo local (Qwen3), corre como servicio systemd (`ollama.service`, usuario/grupo propios `ollama`) | `sudo systemctl disable --now ollama`, borrar `/usr/local/bin/ollama`, `/usr/share/ollama`, `sudo userdel ollama` |
 | Modelos `qwen3:4b-instruct` y `qwen3:4b` | `ollama pull qwen3:4b-instruct` | Cerebro del asistente (tool calling) | `ollama rm qwen3:4b-instruct qwen3:4b` (~5 GB en `~/.ollama/models`) |
 | `playerctl` | `sudo apt install playerctl` | `control_media`: play/pausa/siguiente vía MPRIS (D-Bus) | `sudo apt remove playerctl` |
-| `wmctrl` | `sudo apt install wmctrl` | La boca: pedirle a Mutter "siempre encima" (`-b add,above`) para la ventana, de forma más persistente que el flag `on_top` de Qt | `sudo apt remove wmctrl` |
-| `libxcb-cursor0`, `libxcb-icccm4`, `libxcb-keysyms1` | `sudo apt install libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1` | La boca: dependencias del plugin `xcb` de Qt, para correr vía `QT_QPA_PLATFORM=xcb` (XWayland) — la sesión es Wayland nativo, donde `wmctrl` no ve ninguna ventana | `sudo apt remove libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1` |
+| `wmctrl` | `sudo apt install wmctrl` | El soul-connector **clásico** (pywebview): pedirle a Mutter "siempre encima" (`-b add,above`) para la ventana, de forma más persistente que el flag `on_top` de Qt. El soul-connector como extensión de GNOME (`soul-connector-gnome/`) no lo necesita — vive en la capa de *chrome* del shell, siempre encima sin pedirlo | `sudo apt remove wmctrl` |
+| `libxcb-cursor0`, `libxcb-icccm4`, `libxcb-keysyms1` | `sudo apt install libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1` | El soul-connector clásico: dependencias del plugin `xcb` de Qt, para correr vía `QT_QPA_PLATFORM=xcb` (XWayland) — la sesión es Wayland nativo, donde `wmctrl` no ve ninguna ventana | `sudo apt remove libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1` |
 
 ## Cuentas / apps externas registradas
 

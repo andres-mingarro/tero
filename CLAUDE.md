@@ -18,7 +18,7 @@ Idioma del asistente y del código: **español**.
 2. Se suelta → beep → transcribe (local).
 3. Un modelo local chico elige una herramienta y la ejecuta.
 4. Responde por voz (TTS local).
-5. Una ventana overlay muestra una "boca" de onda de audio mientras habla.
+5. Una ventana overlay muestra el "soul-connector", una onda de audio, mientras habla.
 
 Ejemplos de uso previstos:
 
@@ -152,8 +152,10 @@ tero/
                      terminal.py, tiempo.py, volumen.py,
                      _spotify_auth.py, _telegram.py, _ducking.py,
                      codex.py (fase 4)
-  boca/              server.py, ventana.py, audio_sistema.py, index.html,
+  soul_connector/    server.py, ventana.py, audio_sistema.py, index.html,
                      siriwave.umd.js (vendorizada)
+  soul-connector-gnome/  extension.js, onda.js, barra.js, mover.js, enlace.js
+                     (misma onda, como extensión de GNOME Shell)
   config.toml
 ```
 
@@ -264,13 +266,22 @@ timeout generoso, salida capturada. Tres cuidados:
 
 ---
 
-## La boca (overlay) ✅
+## El soul-connector (overlay) ✅
 
-Es render, no IA. No hace falta sincronía labial ni fonemas. Implementada
+Es render, no IA. No hace falta sincronía labial ni fonemas. Implementado
 con `pywebview` (backend Qt/QtWebEngine — no hay PyGObject en este
-entorno, así que GTK no está disponible) renderizando `boca/index.html`
-(SiriWave vendorizada), y `boca/server.py` mandándole niveles/estado por
-WebSocket local (`ws://127.0.0.1:8765`).
+entorno, así que GTK no está disponible) renderizando
+`soul_connector/index.html` (SiriWave vendorizada), y
+`soul_connector/server.py` mandándole niveles/estado por WebSocket local
+(`ws://127.0.0.1:8765`).
+
+Hay una segunda implementación, `soul-connector-gnome/`: la misma onda
+pero como extensión de GNOME Shell, corriendo adentro de `gnome-shell` en
+vez de levantar un Chromium propio (~1,3 GB de RAM medidos vs. por debajo
+del ruido de medición). `./tero` detecta sola cuál usar — ver
+`soul-connector-gnome/README.md` para el detalle completo (geometría
+medida, trampas de GNOME 50, arrastre con el mouse). Lo que sigue acá
+describe la implementación original en pywebview.
 
 - Señal: RMS real, no solo del TTS. Tres fuentes según el estado:
   el audio del TTS mientras habla, el **micrófono en vivo** mientras
@@ -278,7 +289,7 @@ WebSocket local (`ws://127.0.0.1:8765`).
   contra el pico reciente de volumen — un multiplicador fijo no sirve
   porque el rms de un mic vive en una escala mucho más baja e
   impredecible que la del audio de TTS), y el audio de salida del sistema
-  (PipeWire, `boca/audio_sistema.py`) cuando no pasa nada más.
+  (PipeWire, `soul_connector/audio_sistema.py`) cuando no pasa nada más.
 - **Suavizado asimétrico**: ataque rápido, decaimiento lento. Esto es lo
   que separa "se ve pro" de "se ve amateur". El RMS crudo tiembla.
 - Ventana: sin bordes, sin foco. "Siempre encima" no es persistente bajo
@@ -303,8 +314,8 @@ WebSocket local (`ws://127.0.0.1:8765`).
   suena en Spotify (polling cada ~5s, interpolado en cada frame). Se
   oculta sola si queda pausada 30s seguidos.
 
-**El daemon tiene que funcionar sin la boca.** La ventana es un cliente
-opcional del stream de niveles.
+**El daemon tiene que funcionar sin el soul-connector.** La ventana es un
+cliente opcional del stream de niveles.
 
 ---
 
@@ -395,7 +406,7 @@ que `./tero` distingue de una caída de verdad.
 3. **Contexto** — ventana activa, portapapeles, captura bajo demanda.
    No arrancado.
 4. **Codex** — la rama pesada. No arrancado.
-5. **Boca** ✅ — overlay con WebSocket, ver sección dedicada más arriba.
+5. **Soul-connector** ✅ — overlay con WebSocket, ver sección dedicada más arriba.
 6. **Linux** ✅ — `plataforma/linux.py` ya existe y funciona (desarrollo
    pasó a Linux desde el arranque del proyecto; no hay
    `plataforma/windows.py`).
@@ -416,5 +427,5 @@ para retomar:
 - Stack habitual: Next.js 15, TypeScript, Tailwind, Neon (PostgreSQL),
   Vercel. Este proyecto es Python, o sea territorio menos familiar.
 - Preferencia por explicaciones concisas y directas.
-- El overlay en WebView se eligió justamente para poder diseñar la boca con
-  canvas/CSS en lugar de pelear con Cairo u OpenGL.
+- El overlay en WebView se eligió justamente para poder diseñar el
+  soul-connector con canvas/CSS en lugar de pelear con Cairo u OpenGL.

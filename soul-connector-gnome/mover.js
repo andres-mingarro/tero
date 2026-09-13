@@ -1,4 +1,4 @@
-// Mover la boca con el mouse (Ctrl+Alt + arrastrar), sin perder el
+// Mover el soul-connector con el mouse (Ctrl+Alt + arrastrar), sin perder el
 // click-through.
 //
 // Cómo decide GNOME 50 quién recibe un clic: con el *pick* de Clutter en
@@ -7,10 +7,10 @@
 // "región de entrada" precalculada (`_updateRegions()` de layout.js solo
 // arma struts), así que cambiar `reactive` vale desde el próximo clic.
 //
-// La boca en sí nunca es reactiva. Encima tiene un "asa": un widget del
-// tamaño de toda la boca que solo aparece (y solo es reactivo) mientras
-// Ctrl+Alt está apretado con el puntero encima. El resto del tiempo la
-// boca es atravesable, como siempre.
+// El soul-connector en sí nunca es reactivo. Encima tiene un "asa": un
+// widget del tamaño de todo el soul-connector que solo aparece (y solo es reactivo) mientras
+// Ctrl+Alt está apretado con el puntero encima. El resto del tiempo el
+// soul-connector es atravesable, como siempre.
 //
 // Tres intentos anteriores que no sirvieron, para no repetirlos:
 //
@@ -19,8 +19,8 @@
 // - Leer el puntero dejando pasar el clic: la ventana de abajo también
 //   recibe el Ctrl+Alt+arrastre, y tiling-assistant usa justamente Ctrl y
 //   Alt durante un arrastre de ventana -- la ventana se movía en
-//   cuadrícula mientras la boca no.
-// - Volver reactiva la raíz de la boca: anda, pero solo si el clic cae
+//   cuadrícula mientras el soul-connector no.
+// - Volver reactivo el actor raíz del soul-connector: anda, pero solo si el clic cae
 //   exactamente sobre lo que está dibujado (la línea de la onda). La raíz
 //   no tiene fondo, así que el resto del rectángulo no cuenta como suyo.
 //   El asa sí tiene fondo, así que se agarra desde cualquier punto.
@@ -40,7 +40,7 @@ const BOTON = Clutter.ModifierType.BUTTON1_MASK;
 const INTERVALO_MS = 30;
 
 function rutaArchivo() {
-    return GLib.build_filenamev([GLib.get_user_config_dir(), 'tero', 'boca_posicion.json']);
+    return GLib.build_filenamev([GLib.get_user_config_dir(), 'tero', 'soul_connector_posicion.json']);
 }
 
 /** Posición guardada, o null si no hay ninguna o el archivo está roto. */
@@ -64,13 +64,13 @@ function guardarPosicion(x, y) {
         GLib.mkdir_with_parents(GLib.path_get_dirname(ruta), 0o700);
         GLib.file_set_contents(ruta, JSON.stringify({x: Math.round(x), y: Math.round(y)}));
     } catch (e) {
-        logError(e, 'boca: no pude guardar la posición');
+        logError(e, 'soul-connector: no pude guardar la posición');
     }
 }
 
 export class Arrastre {
     /**
-     * @param actor la raíz de la boca (St.Widget con FixedLayout, no reactiva)
+     * @param actor la raíz del soul-connector (St.Widget con FixedLayout, no reactiva)
      * @param alSoltar callback con (x, y) cuando termina el arrastre
      */
     constructor(actor, alSoltar) {
@@ -82,7 +82,7 @@ export class Arrastre {
 
         const [ancho, alto] = actor.get_size();
         this._asa = new St.Widget({
-            style_class: 'tero-boca-asa',
+            style_class: 'tero-soul-connector-asa',
             width: ancho,
             height: alto,
             reactive: false,
@@ -109,7 +109,7 @@ export class Arrastre {
             } catch (e) {
                 // Se desarma solo y vuelve a ser atravesable: se pierde
                 // el arrastre, nunca los clics.
-                logError(e, 'boca: arrastre desactivado por un error');
+                logError(e, 'soul-connector: arrastre desactivado por un error');
                 this._mostrarAsa(false);
                 this._idTimer = 0;
                 return GLib.SOURCE_REMOVE;

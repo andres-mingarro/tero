@@ -1,13 +1,14 @@
-// La boca de Tero como extensión de GNOME Shell.
+// El soul-connector de Tero como extensión de GNOME Shell.
 //
-// Por qué existe: la boca original (boca/, pywebview + QtWebEngine) se
+// Por qué existe: el soul-connector original (soul_connector/, pywebview +
+// QtWebEngine) se
 // lleva ~1,3 GB de RAM para dibujar una onda, porque levanta un Chromium
 // entero. Acá el dibujo corre adentro de gnome-shell, que ya está en
 // memoria, así que el costo extra es esencialmente el de los dos senos
 // que se calculan por frame.
 //
 // De yapa resuelve un problema viejo: el "siempre encima" nunca funcionó
-// bien bajo Mutter (ver CLAUDE.md), y la boca de pywebview lo peleaba
+// bien bajo Mutter (ver CLAUDE.md), y el soul-connector de pywebview lo peleaba
 // llamando a wmctrl en un bucle mientras Tero hablaba. Siendo parte del
 // shell no hay nada que pelear: el actor vive en la capa de chrome, por
 // encima de las ventanas, siempre.
@@ -33,7 +34,7 @@ const MARGEN = 20;
 // salen bastante: sin este alto el dibujo queda recortado.
 const ALTO_BARRA = 20;
 
-// Medido con el DOM sobre boca/index.html, que es el original: en un
+// Medido con el DOM sobre soul_connector/index.html, que es el original: en un
 // cuadro de 260x74 los tiempos ocupan y 23,5-33,5, la línea de la barra
 // va en y=34 (o sea apoyada sobre el eje de la onda, por eso se ven como
 // una sola línea) y el nombre de la canción en y 39-51.
@@ -42,7 +43,7 @@ const Y_CANCION = 39;
 const FPS = 60;
 const FPS_IDLE = 30; // en reposo la onda apenas respira: no hace falta más
 
-// Mismos colores y constantes que boca/index.html, para que el look no
+// Mismos colores y constantes que soul_connector/index.html, para que el look no
 // cambie al migrar.
 const COLORES = {
     idle: [0x4a, 0x44, 0x58],
@@ -70,7 +71,7 @@ function formatearTiempo(ms) {
     return `${min}:${seg.toString().padStart(2, '0')}`;
 }
 
-class Boca {
+class SoulConnector {
     constructor() {
         this._estado = 'idle';
         this._nivelCrudo = 0;
@@ -113,7 +114,7 @@ class Boca {
         this._raiz.add_child(this._area);
 
         this._etiquetaCancion = new St.Label({
-            style_class: 'tero-boca-cancion',
+            style_class: 'tero-soul-connector-cancion',
             x_align: Clutter.ActorAlign.CENTER,
         });
         this._etiquetaCancion.clutter_text.set_line_wrap(false);
@@ -126,7 +127,7 @@ class Boca {
         // Mismo lugar que el nombre de la canción: mientras Tero arranca o
         // está apagado no hay canción que mostrar, así que no compiten.
         this._etiquetaAviso = new St.Label({
-            style_class: 'tero-boca-aviso',
+            style_class: 'tero-soul-connector-aviso',
             x_align: Clutter.ActorAlign.CENTER,
         });
         this._etiquetaAviso.clutter_text.set_ellipsize(3 /* END */);
@@ -136,7 +137,7 @@ class Boca {
         this._raiz.add_child(this._etiquetaAviso);
 
         this._filaProgreso = new St.BoxLayout({
-            style_class: 'tero-boca-progreso',
+            style_class: 'tero-soul-connector-progreso',
             width: ANCHO - 20,
         });
         // La fila se centra sobre el eje de la onda, de modo que la línea
@@ -147,14 +148,14 @@ class Boca {
             10, Math.round(lineaBase(ALTO) - ALTO_BARRA / 2));
         this._filaProgreso.opacity = 0;
 
-        this._tiempoActual = new St.Label({style_class: 'tero-boca-tiempo'});
+        this._tiempoActual = new St.Label({style_class: 'tero-soul-connector-tiempo'});
         this._pista = new St.DrawingArea({
             height: ALTO_BARRA,
             x_expand: true,
             y_align: Clutter.ActorAlign.CENTER,
         });
         this._pista.connect('repaint', a => this._pintarBarra(a));
-        this._tiempoTotal = new St.Label({style_class: 'tero-boca-tiempo'});
+        this._tiempoTotal = new St.Label({style_class: 'tero-soul-connector-tiempo'});
 
         this._filaProgreso.add_child(this._tiempoActual);
         this._filaProgreso.add_child(this._pista);
@@ -318,9 +319,9 @@ class Boca {
     }
 }
 
-export default class BocaExtension extends Extension {
+export default class SoulConnectorExtension extends Extension {
     enable() {
-        this._boca = new Boca();
+        this._soulConnector = new SoulConnector();
         // addChrome (y no un actor suelto en uiGroup) es lo que lo pone en
         // la capa de chrome: por encima de las ventanas y bien tratado al
         // entrar y salir de pantalla completa.
@@ -328,23 +329,23 @@ export default class BocaExtension extends Extension {
         // Ojo: el viejo parámetro `affectsInputRegion: false` ya no existe
         // en GNOME 50 (tira "Unrecognized parameter" y la extensión no
         // carga). Que los clics pasen de largo ahora sale de que el actor
-        // es `reactive: false`, que es como se construye en Boca.
-        Main.layoutManager.addChrome(this._boca.actor, {
+        // es `reactive: false`, que es como se construye en SoulConnector.
+        Main.layoutManager.addChrome(this._soulConnector.actor, {
             trackFullscreen: true,
         });
         this._posicion = leerPosicion();
         this._ubicar();
-        this._arrastre = new Arrastre(this._boca.actor, (x, y) => {
+        this._arrastre = new Arrastre(this._soulConnector.actor, (x, y) => {
             this._posicion = {x, y};
         });
         this._idMonitores = Main.layoutManager.connect(
             'monitors-changed', () => this._ubicar());
         // Y este es el que importa de verdad. En el login la extensión
         // puede habilitarse ANTES de que el dock reserve su franja: ahí
-        // el work area todavía es el monitor entero, la boca se ubica
-        // abajo de todo y queda tapada para siempre, porque
+        // el work area todavía es el monitor entero, el soul-connector se
+        // ubica abajo de todo y queda tapado para siempre, porque
         // `monitors-changed` no se dispara por eso. `workareas-changed`
-        // sí, así que la boca se reacomoda sola cuando el dock aparece,
+        // sí, así que el soul-connector se reacomoda solo cuando el dock aparece,
         // se va, cambia de lado o cambia de tamaño.
         this._idAreas = global.display.connect(
             'workareas-changed', () => this._ubicar());
@@ -352,29 +353,29 @@ export default class BocaExtension extends Extension {
 
     _ubicar() {
         const monitor = Main.layoutManager.primaryMonitor;
-        if (!monitor || !this._boca)
+        if (!monitor || !this._soulConnector)
             return;
         // Nunca el rectángulo crudo del monitor: si hay un dock (Ubuntu
         // dock, dash-to-dock) reservando franja, el rectángulo del work
-        // area ya viene descontado -- así la boca queda arriba del dock
+        // area ya viene descontado -- así el soul-connector queda arriba del dock
         // en vez de superpuesta y tapada por él (pasó de verdad: con
         // dock abajo, el nombre de la canción quedaba atrás del dock).
         const area = Main.layoutManager.getWorkAreaForMonitor(monitor.index);
         const base = area || monitor;
 
-        // Si el usuario la movió a mano, mandar esa posición -- pero
+        // Si el usuario lo movió a mano, mandar esa posición -- pero
         // igual recortada al work area, para que un dock que aparece o un
         // monitor que se desconecta no la dejen fuera de la pantalla, sin
         // forma de agarrarla para traerla de vuelta.
         if (this._posicion) {
-            this._boca.actor.set_position(
+            this._soulConnector.actor.set_position(
                 Math.max(base.x, Math.min(this._posicion.x, base.x + base.width - ANCHO)),
                 Math.max(base.y, Math.min(this._posicion.y, base.y + base.height - ALTO))
             );
             return;
         }
 
-        this._boca.actor.set_position(
+        this._soulConnector.actor.set_position(
             base.x + base.width - ANCHO - MARGEN,
             base.y + base.height - ALTO - MARGEN
         );
@@ -393,10 +394,10 @@ export default class BocaExtension extends Extension {
             this._arrastre.destruir();
             this._arrastre = null;
         }
-        if (this._boca) {
-            Main.layoutManager.removeChrome(this._boca.actor);
-            this._boca.destruir();
-            this._boca = null;
+        if (this._soulConnector) {
+            Main.layoutManager.removeChrome(this._soulConnector.actor);
+            this._soulConnector.destruir();
+            this._soulConnector = null;
         }
     }
 }

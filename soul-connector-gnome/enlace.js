@@ -1,12 +1,12 @@
-// Cliente del stream de niveles del daemon (boca/server.py), hablado por
-// WebSocket contra ws://127.0.0.1:8765.
+// Cliente del stream de niveles del daemon (soul_connector/server.py),
+// hablado por WebSocket contra ws://127.0.0.1:8765.
 //
-// Se reusa el mismo servidor y el mismo protocolo JSON que ya consume la
-// boca de pywebview, sin tocar una línea del daemon: para Tero esto es
-// otro cliente más del stream, exactamente como dice CLAUDE.md que tiene
-// que ser ("El daemon tiene que funcionar sin la boca. La ventana es un
-// cliente opcional del stream de niveles"). Eso es lo que hace que esta
-// extensión se pueda sacar sin consecuencias.
+// Se reusa el mismo servidor y el mismo protocolo JSON que ya consume el
+// soul-connector de pywebview, sin tocar una línea del daemon: para Tero
+// esto es otro cliente más del stream, exactamente como dice CLAUDE.md que
+// tiene que ser ("El daemon tiene que funcionar sin el soul-connector. La
+// ventana es un cliente opcional del stream de niveles"). Eso es lo que
+// hace que esta extensión se pueda sacar sin consecuencias.
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';

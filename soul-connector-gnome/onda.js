@@ -1,5 +1,5 @@
-// Port a Cairo del estilo "ios9" de SiriWave (boca/siriwave.umd.js), que
-// en la boca de pywebview se dibujaba en un <canvas>. La matemática es la
+// Port a Cairo del estilo "ios9" de SiriWave (soul_connector/siriwave.umd.js),
+// que en el soul-connector de pywebview se dibujaba en un <canvas>. La matemática es la
 // misma, traducida 1:1 desde iOS9Curve para que la onda se vea igual:
 // cada "curva" de color es en realidad un puñado de senos superpuestos que
 // nacen y mueren solos, recortados por una envolvente que los apaga hacia

@@ -45,7 +45,7 @@ _VOLUMEN_DUCKED = 0.10
 _PASO_S = 0.02
 # Bajar rápido (tapar la música antes de que el mic termine de abrirse) y
 # subir despacio (que no se note el regreso) -- mismo criterio de
-# suavizado asimétrico que ya se usa en la boca para el RMS.
+# suavizado asimétrico que ya se usa en el soul-connector para el RMS.
 _FACTOR_BAJADA = 0.35
 _FACTOR_SUBIDA = 0.12
 _UMBRAL_LISTO = 0.004

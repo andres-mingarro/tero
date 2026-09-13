@@ -1,27 +1,27 @@
-# Boca de Tero como extensión de GNOME Shell
+# Soul Connector de Tero como extensión de GNOME Shell
 
-La misma onda que `boca/` (pywebview), pero dibujada adentro de
+La misma onda que `soul_connector/` (pywebview), pero dibujada adentro de
 gnome-shell en vez de adentro de un Chromium propio.
 
-**Por qué:** la boca de pywebview se lleva ~1,3 GB de RAM (medido) porque
-levanta QtWebEngine — un navegador entero — para dibujar una onda de
-260x74. Acá el dibujo corre en el proceso de gnome-shell, que ya está en
-memoria.
+**Por qué:** el soul-connector de pywebview se lleva ~1,3 GB de RAM
+(medido) porque levanta QtWebEngine — un navegador entero — para dibujar
+una onda de 260x74. Acá el dibujo corre en el proceso de gnome-shell, que
+ya está en memoria.
 
 **Medición del reemplazo**, comparando el PSS de gnome-shell con la
 extensión habilitada y deshabilitada:
 
 | | RAM |
 |---|---|
-| Boca pywebview (QtWebEngine + Python) | ~1300 MB |
-| Boca extensión | **por debajo del ruido de medición** (±1,4 MB) |
+| Soul-connector pywebview (QtWebEngine + Python) | ~1300 MB |
+| Soul-connector extensión | **por debajo del ruido de medición** (±1,4 MB) |
 
 El proceso de gnome-shell fluctúa más de lo que cuesta la extensión.
 
 De yapa resuelve un problema viejo: el "siempre encima" nunca funcionó
-bien bajo Mutter, y la boca de pywebview lo peleaba llamando a `wmctrl` en
-un bucle mientras Tero hablaba. Siendo parte del shell no hay nada que
-pelear.
+bien bajo Mutter, y el soul-connector de pywebview lo peleaba llamando a
+`wmctrl` en un bucle mientras Tero hablaba. Siendo parte del shell no hay
+nada que pelear.
 
 ## Instalar
 
@@ -45,16 +45,17 @@ reloguear ya queda andando sola.
 Y se fue. Esto está pensado así desde el diseño:
 
 - **No toca el daemon.** La extensión es otro cliente más del WebSocket de
-  niveles (`ws://127.0.0.1:8765`), el mismo que ya consume `boca/`. No hay
-  una sola línea distinta en `main.py`, `boca/server.py` ni en las
-  herramientas. Volver a la rama `main` no requiere deshacer nada acá.
+  niveles (`ws://127.0.0.1:8765`), el mismo que ya consume
+  `soul_connector/`. No hay una sola línea distinta en `main.py`,
+  `soul_connector/server.py` ni en las herramientas. Volver a la rama
+  `main` no requiere deshacer nada acá.
 - **No instala nada a nivel sistema.** Ni paquetes, ni servicios, ni sudo.
   Lo único que deja fuera del repo es un symlink en el home y el uuid
   anotado en dconf; `desinstalar.sh` borra las dos cosas.
-- **La boca de pywebview sigue intacta.** `boca/` no se tocó: si sacás la
-  extensión, `./tero` vuelve a levantarla solo (detecta si la extensión
-  está habilitada y en ese caso no la levanta, para no tener dos ondas
-  superpuestas).
+- **El soul-connector de pywebview sigue intacto.** `soul_connector/` no
+  se tocó: si sacás la extensión, `./tero` vuelve a levantarlo solo
+  (detecta si la extensión está habilitada y en ese caso no lo levanta,
+  para no tener dos ondas superpuestas).
 - **Si la extensión falla, falla sola.** GNOME la deshabilita y sigue; no
   se lleva puesta la sesión.
 
@@ -67,16 +68,16 @@ Y se fue. Esto está pensado así desde el diseño:
 | `enlace.js` | Cliente WebSocket del stream de niveles del daemon |
 | `stylesheet.css` | Tipografías y colores del nombre de canción y la barra |
 
-## Moverla
+## Moverlo
 
 `Ctrl+Alt` + arrastrar con el mouse. La posición se guarda en
-`~/.config/tero/boca_posicion.json` y se respeta en el próximo arranque,
-recortada al work area por si cambió la pantalla.
+`~/.config/tero/soul_connector_posicion.json` y se respeta en el próximo
+arranque, recortada al work area por si cambió la pantalla.
 
 En GNOME 50 quién recibe un clic lo decide el *pick* de Clutter en ese
 momento: actor reactivo bajo el puntero → el clic va al shell; si no,
-pasa a la ventana de abajo. Por eso la boca es reactiva **solo mientras
-Ctrl+Alt está apretado con el puntero encima** (se consulta con
+pasa a la ventana de abajo. Por eso el soul-connector es reactivo **solo
+mientras Ctrl+Alt está apretado con el puntero encima** (se consulta con
 `global.get_pointer()` cada 30 ms). El resto del tiempo es atravesable.
 
 Dos caminos que no funcionan, para no repetirlos:
@@ -117,7 +118,7 @@ Para ver si cargó bien, contra el bus de esa sesión anidada:
 ```bash
 gdbus call --session --dest org.gnome.Shell.Extensions \
   --object-path /org/gnome/Shell/Extensions \
-  --method org.gnome.Shell.Extensions.GetExtensionInfo "boca@tero.local"
+  --method org.gnome.Shell.Extensions.GetExtensionInfo "soul-connector@tero.local"
 ```
 
 `'state': <1.0>` es habilitada y andando; `'error'` trae el mensaje si
@@ -134,7 +135,7 @@ reconexión del WebSocket — pero la hace el código viejo.
 O sea que esto **no sirve** para probar un cambio:
 
 ```bash
-gnome-extensions disable boca@tero.local && gnome-extensions enable boca@tero.local
+gnome-extensions disable soul-connector@tero.local && gnome-extensions enable soul-connector@tero.local
 ```
 
 En Wayland la única forma de cargar código nuevo es cerrar sesión y
@@ -146,7 +147,7 @@ Para confirmar qué versión quedó cargada, un `log()` al principio de
 `enable()` y después:
 
 ```bash
-journalctl --user --since "1 minute ago" -o cat | grep boca
+journalctl --user --since "1 minute ago" -o cat | grep soul-connector
 ```
 
 Ojo con `journalctl -f` redirigido a un archivo: se bufferea y puede
@@ -166,7 +167,7 @@ Verificado en GNOME Shell 50.1:
 - El render de la onda se validó aparte, dibujando a PNG con Cairo: sale
   el multicolor azul/rojo/verde del original.
 
-Lo único que **no** está verificado es cómo se ve ubicada en pantalla
+Lo único que **no** está verificado es cómo se ve ubicado en pantalla
 dentro de la sesión real — GNOME bloquea la API de screenshot para
 llamadores no autorizados, así que eso hay que mirarlo a ojo después de
 reloguear.

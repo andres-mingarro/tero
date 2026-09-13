@@ -41,8 +41,8 @@ import numpy as np
 import sounddevice as sd
 
 import salud
-from boca.audio_sistema import MonitorAudioSistema
-from boca.server import ServidorBoca
+from soul_connector.audio_sistema import MonitorAudioSistema
+from soul_connector.server import ServidorSoulConnector
 from cerebro.router import Cerebro
 from herramientas import musica
 from herramientas._ducking import Ducker
@@ -68,7 +68,7 @@ class Grabador:
         self._canales = canales
         self._trozos: list[np.ndarray] = []
         self._stream: sd.InputStream | None = None
-        # Opcional: nivel del mic en vivo mientras graba, para que la boca
+        # Opcional: nivel del mic en vivo mientras graba, para que el soul-connector
         # se mueva con la voz real del usuario en vez de un valor fijo.
         self._on_nivel = on_nivel
         # Auto-gain en vez de un multiplicador fijo: un número calibrado a
@@ -112,14 +112,14 @@ class Tero:
         self._config = config
         self._plataforma = crear_plataforma(tecla=config["tecla"]["nombre"])
         self._grabador = Grabador(
-            config["audio"]["muestreo_hz"], config["audio"]["canales"], on_nivel=self._nivel_boca
+            config["audio"]["muestreo_hz"], config["audio"]["canales"], on_nivel=self._nivel_soul_connector
         )
-        # La boca primero, antes que los modelos: así puede mostrar en qué
+        # El soul-connector primero, antes que los modelos: así puede mostrar en qué
         # etapa del arranque va, en vez de quedarse dibujando una onda que
         # parece lista y no responde.
-        self._boca = self._crear_boca()
+        self._soul_connector = self._crear_soul_connector()
         # Antes de tocar self._stt/_tts: _decir() (el aviso hablado de
-        # Groq <-> local) pasa por _estado_boca(), que necesita las dos.
+        # Groq <-> local) pasa por _estado_soul_connector(), que necesita las dos.
         self._estado_voz = "idle"
         self._ducker = Ducker()
 
@@ -129,17 +129,17 @@ class Tero:
             # del plan gratis (2000 pedidos/día), así que Whisper local
             # queda de respaldo para cuando falla Internet, cargado recién
             # la primera vez que hace falta -- ver voz/stt.py.
-            self._carga_boca("Transcripción por Groq (online)", 0.0)
+            self._carga_soul_connector("Transcripción por Groq (online)", 0.0)
             self._stt = STTHibrido(
-                config["stt"], on_aviso=self._decir, on_carga=self._carga_boca,
+                config["stt"], on_aviso=self._decir, on_carga=self._carga_soul_connector,
                 muestreo_hz=config["audio"]["muestreo_hz"],
             )
             print("STT: Groq online, Whisper local de respaldo si hace falta.")
         else:
-            self._carga_boca("Cargando transcripción", 0.0)
+            self._carga_soul_connector("Cargando transcripción", 0.0)
             print("Cargando modelo de transcripción...")
             self._stt = LocalSTT(**config["stt"])
-        self._carga_boca("Cargando voz", 1 / 3)
+        self._carga_soul_connector("Cargando voz", 1 / 3)
         print("Cargando voz...")
         self._tts = TTS(**config["tts"])
         self._cerebro = Cerebro(**config["cerebro"])
@@ -147,10 +147,10 @@ class Tero:
         # el modelo lleva más que el timeout de una consulta (ver
         # cerebro/router.py), y el primer pedido fallaba con "se colgó el
         # modelo local".
-        self._carga_boca("Cargando modelo de lenguaje", 2 / 3)
+        self._carga_soul_connector("Cargando modelo de lenguaje", 2 / 3)
         print("Cargando modelo de lenguaje...")
         self._cerebro.precargar()
-        self._carga_boca(None)
+        self._carga_soul_connector(None)
         self._monitor_audio = self._crear_monitor_audio()
         self._motivo_corte: str | None = None
         self._monitor_salud = salud.MonitorSalud(
@@ -164,36 +164,36 @@ class Tero:
 
         self._ultimo_poll_cancion = 0.0
         # Cuándo empezó la pausa actual (None si no está pausado o no hay
-        # nada cargado). Sirve para ocultar el reproductor de la boca si
+        # nada cargado). Sirve para ocultar el reproductor del soul-connector si
         # queda pausado mucho tiempo -- mostrar "pausado" para siempre
         # después de que el usuario se olvidó de la música es ruido visual
         # que no aporta nada.
         self._pausado_desde: float | None = None
 
-    def _crear_boca(self) -> ServidorBoca | None:
-        # La boca es un cliente opcional: si esto falla por lo que sea, el
+    def _crear_soul_connector(self) -> ServidorSoulConnector | None:
+        # El soul-connector es un cliente opcional: si esto falla por lo que sea, el
         # daemon tiene que seguir funcionando igual, sin ventana.
         try:
-            return ServidorBoca()
+            return ServidorSoulConnector()
         except Exception as error:
-            print(f"(boca no disponible: {error})")
+            print(f"(soul-connector no disponible: {error})")
             return None
 
-    def _carga_boca(self, texto: str | None, progreso: float = 0.0) -> None:
-        if self._boca is not None:
-            self._boca.carga(texto, progreso)
+    def _carga_soul_connector(self, texto: str | None, progreso: float = 0.0) -> None:
+        if self._soul_connector is not None:
+            self._soul_connector.carga(texto, progreso)
 
     def _crear_monitor_audio(self) -> MonitorAudioSistema | None:
-        # Igual que la boca: opcional, el daemon tiene que andar sin esto.
+        # Igual que el soul-connector: opcional, el daemon tiene que andar sin esto.
         try:
             return MonitorAudioSistema(
-                on_nivel=self._nivel_musica_boca, on_silencio=self._silencio_musica_boca
+                on_nivel=self._nivel_musica_soul_connector, on_silencio=self._silencio_musica_soul_connector
             )
         except Exception as error:
             print(f"(monitor de audio del sistema no disponible: {error})")
             return None
 
-    def _estado_boca(self, nombre: str) -> None:
+    def _estado_soul_connector(self, nombre: str) -> None:
         anterior = self._estado_voz
         self._estado_voz = nombre
         # Duckear música mientras se escucha/piensa/habla (no solo mientras
@@ -205,27 +205,27 @@ class Tero:
             self._ducker.activar()
         elif nombre == "idle" and anterior != "idle":
             self._ducker.desactivar()
-        if self._boca is not None:
-            self._boca.estado(nombre)
+        if self._soul_connector is not None:
+            self._soul_connector.estado(nombre)
 
     def _decir(self, texto: str) -> None:
         """Habla un aviso fuera del flujo normal de turno (ej. Groq <-> Whisper
         local), sin pasar por el cerebro ni por una grabación del usuario."""
         anterior = self._estado_voz
-        self._estado_boca("hablando")
-        self._tts.hablar(texto, on_nivel=self._nivel_boca)
-        self._estado_boca(anterior)
+        self._estado_soul_connector("hablando")
+        self._tts.hablar(texto, on_nivel=self._nivel_soul_connector)
+        self._estado_soul_connector(anterior)
 
-    def _nivel_musica_boca(self, nivel: float) -> None:
+    def _nivel_musica_soul_connector(self, nivel: float) -> None:
         # Solo si Tero no está en medio de escuchar/pensar/hablar -- eso
         # siempre tiene prioridad visual sobre "hay música sonando".
-        if self._boca is not None and self._estado_voz == "idle":
-            self._boca.estado("musica")
-            self._boca.nivel(nivel)
+        if self._soul_connector is not None and self._estado_voz == "idle":
+            self._soul_connector.estado("musica")
+            self._soul_connector.nivel(nivel)
 
-    def _silencio_musica_boca(self) -> None:
-        if self._boca is not None and self._estado_voz == "idle":
-            self._boca.estado("idle")
+    def _silencio_musica_soul_connector(self) -> None:
+        if self._soul_connector is not None and self._estado_voz == "idle":
+            self._soul_connector.estado("idle")
 
     def on_down(self) -> None:
         if not self._grabando:
@@ -233,7 +233,7 @@ class Tero:
             self._grabando = True
             self._modo_toggle = False
             _beep(880)
-            self._estado_boca("escuchando")
+            self._estado_soul_connector("escuchando")
             self._grabador.iniciar()
 
     def on_up(self) -> None:
@@ -255,7 +255,7 @@ class Tero:
     def _procesar(self, audio: np.ndarray) -> None:
         if audio.size < self._config["audio"]["muestreo_hz"] * 0.2:
             print("(audio demasiado corto, se ignora)")
-            self._estado_boca("idle")
+            self._estado_soul_connector("idle")
             return
         rms = float(np.sqrt(np.mean(np.square(audio))))
         if rms < 0.001:
@@ -265,33 +265,33 @@ class Tero:
             # esa clase entera de falso positivo.
             print(f"(audio en silencio, rms={rms:.5f} -- ¿mic apagado/mute? no se transcribe)")
             self._plataforma.notificar("(silencio: ¿el micrófono está apagado?)")
-            self._estado_boca("idle")
+            self._estado_soul_connector("idle")
             return
-        self._estado_boca("pensando")
+        self._estado_soul_connector("pensando")
         t0 = time.monotonic()
         texto = self._stt.transcribir(audio)
         t1 = time.monotonic()
         print(f"transcripción ({t1 - t0:.2f}s): {texto!r}")
         self._plataforma.notificar(texto or "(no se entendió nada)")
         if not texto:
-            self._estado_boca("idle")
+            self._estado_soul_connector("idle")
             return
         respuesta = self._cerebro.responder(texto)
         t2 = time.monotonic()
         print(f"cerebro ({t2 - t1:.2f}s): {respuesta!r}")
         if not respuesta:
             print("(silencio intencional, no hay nada que decir)")
-            self._estado_boca("idle")
+            self._estado_soul_connector("idle")
             return
-        self._estado_boca("hablando")
-        self._tts.hablar(respuesta, on_nivel=self._nivel_boca)
-        self._estado_boca("idle")
+        self._estado_soul_connector("hablando")
+        self._tts.hablar(respuesta, on_nivel=self._nivel_soul_connector)
+        self._estado_soul_connector("idle")
         t3 = time.monotonic()
         print(f"tts ({t3 - t2:.2f}s), total ({t3 - t0:.2f}s)")
 
-    def _nivel_boca(self, nivel: float) -> None:
-        if self._boca is not None:
-            self._boca.nivel(nivel)
+    def _nivel_soul_connector(self, nivel: float) -> None:
+        if self._soul_connector is not None:
+            self._soul_connector.nivel(nivel)
 
     def _salud_critica(self, motivo: str) -> None:
         # Solo deja el pedido anotado: cerrar de verdad lo hace el bucle
@@ -313,7 +313,7 @@ class Tero:
         try:
             while self._motivo_corte is None:
                 time.sleep(0.5)
-                self._actualizar_cancion_boca()
+                self._actualizar_cancion_soul_connector()
         except KeyboardInterrupt:
             print("\nChau.")
             return
@@ -321,12 +321,12 @@ class Tero:
         # lanzador lo distinga de una caída de verdad.
         sys.exit(salud.CODIGO_SALIDA_SALUD)
 
-    def _actualizar_cancion_boca(self) -> None:
+    def _actualizar_cancion_soul_connector(self) -> None:
         # Cada ~5s (no en cada tick de 0.5s) para no golpear la API de
         # Spotify de más -- se manda siempre (no solo cuando cambia el
-        # tema) porque el progreso avanza en cada poll y la boca lo usa
+        # tema) porque el progreso avanza en cada poll y el soul-connector lo usa
         # para resincronizar la barra que interpola entre actualizaciones.
-        if self._boca is None:
+        if self._soul_connector is None:
             return
         ahora = time.monotonic()
         if ahora - self._ultimo_poll_cancion < 5.0:
@@ -343,7 +343,7 @@ class Tero:
                 # no hubiera nada cargado), no solo se lo deja congelado en
                 # pausa para siempre.
                 info = None
-        self._boca.cancion(info)
+        self._soul_connector.cancion(info)
 
 
 def main() -> None:

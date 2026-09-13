@@ -1,14 +1,14 @@
-"""Ventana de la boca: proceso aparte, cliente opcional del stream de
-niveles. El daemon (main.py) tiene que funcionar sin esto -- correlo vos
-por separado cuando quieras ver la boca:
+"""Ventana del soul-connector: proceso aparte, cliente opcional del stream
+de niveles. El daemon (main.py) tiene que funcionar sin esto -- correlo vos
+por separado cuando quieras verlo:
 
-    uv run python -m boca.ventana
+    uv run python -m soul_connector.ventana
 
 No hay "siempre encima" real en Wayland/GNOME sin gtk-layer-shell (que
 necesita paquetes de sistema y no hay garantía de que Mutter lo soporte
 bien para apps normales). Se optó por algo más simple: la ventana no roba
 foco nunca (focus=False), y se trae al frente sola justo cuando arranca a
-hablar (ver traer_al_frente, llamado desde boca/index.html por WebSocket).
+hablar (ver traer_al_frente, llamado desde soul_connector/index.html por WebSocket).
 Alcanza: solo importa que se vea mientras habla, no el resto del tiempo.
 """
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import webview
 
-_TITULO_VENTANA = "tero-boca"
+_TITULO_VENTANA = "tero-soul-connector"
 
 _RUTA_HTML = Path(__file__).parent / "index.html"
 _RUTA_SIRIWAVE = Path(__file__).parent / "siriwave.umd.js"

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S gjs -m
 //
-// Renderiza la boca a un PNG, fuera de gnome-shell.
+// Renderiza el soul-connector a un PNG, fuera de gnome-shell.
 //
 // Por qué existe: GNOME cachea los módulos ES de las extensiones, así que
 // `disable`/`enable` NO recarga el código (ver README). En Wayland la
@@ -40,7 +40,7 @@ const COLORES = {
     musica: [0x5c, 0xff, 0xd4],
 };
 
-// Un gris de escritorio para que se vea algo: la boca de verdad va sobre
+// Un gris de escritorio para que se vea algo: el soul-connector de verdad va sobre
 // lo que haya abajo, no sobre un fondo propio.
 const FONDO = [0.12, 0.12, 0.13];
 

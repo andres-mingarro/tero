@@ -11,7 +11,7 @@
     {# background: #000000; #}
   }
 
-  #boca-wrapper {
+  #soul-connector-wrapper {
     position: relative;
     width: 260px;
     height: 74px;
@@ -178,7 +178,7 @@
 </style>
 </head>
 <body>
-  <div id="boca-wrapper">
+  <div id="soul-connector-wrapper">
 
     <div id="onda-wrapper">
       <div id="onda"></div>
@@ -252,7 +252,7 @@ function animar() {
 requestAnimationFrame(animar);
 
 // Mutter no respeta "siempre encima" de forma persistente: si el usuario
-// foca otra ventana mientras Tero habla, la boca cae atrás igual aunque
+// foca otra ventana mientras Tero habla, el soul-connector cae atrás igual aunque
 // se haya traído al frente al empezar. Como no hay layer-shell, se
 // reintenta a repetición mientras dura el habla, no solo una vez al
 // arrancar -- molesto pero es lo que hay sin tocar el compositor.
