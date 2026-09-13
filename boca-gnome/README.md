@@ -67,14 +67,45 @@ Y se fue. Esto está pensado así desde el diseño:
 | `enlace.js` | Cliente WebSocket del stream de niveles del daemon |
 | `stylesheet.css` | Tipografías y colores del nombre de canción y la barra |
 
+## Moverla
+
+`Ctrl+Alt` + arrastrar con el mouse. La posición se guarda en
+`~/.config/tero/boca_posicion.json` y se respeta en el próximo arranque,
+recortada al work area por si cambió la pantalla.
+
+En GNOME 50 quién recibe un clic lo decide el *pick* de Clutter en ese
+momento: actor reactivo bajo el puntero → el clic va al shell; si no,
+pasa a la ventana de abajo. Por eso la boca es reactiva **solo mientras
+Ctrl+Alt está apretado con el puntero encima** (se consulta con
+`global.get_pointer()` cada 30 ms). El resto del tiempo es atravesable.
+
+Dos caminos que no funcionan, para no repetirlos:
+
+- `captured-event` en `global.stage` con el actor no reactivo: el clic
+  nunca llega, en Wayland va directo a la ventana.
+- Leer el puntero dejando pasar el clic: la ventana de abajo recibe el
+  Ctrl+Alt+arrastre, y tiling-assistant usa Ctrl y Alt durante un
+  arrastre de ventana — la ventana se mueve en cuadrícula.
+
+Ctrl+Alt y no Super porque Mutter ya usa Super+arrastrar para mover
+ventanas.
+
 ## Desarrollo
 
-En Wayland no se puede reiniciar gnome-shell sin cerrar sesión, así que
-para probar cambios se levanta un shell anidado:
+**Nunca probar en la sesión real.** GNOME cachea el código de la
+extensión y en Wayland recargarlo cuesta un logout. Se prueba en un shell
+anidado — una ventana con un GNOME entero adentro, que arranca de cero:
 
 ```bash
-WAYLAND_DISPLAY=wayland-0 dbus-run-session -- gnome-shell --devkit
+./probar.sh
 ```
+
+Editar, correrlo, probar a mano en esa ventana (arrastre incluido),
+repetir. Vuelve a abrir uno limpio cada vez. Solo al final se reloguea,
+una vez, para pasarlo a la sesión de verdad.
+
+Para cambios de dibujo ni siquiera hace falta eso: `./previsualizar.js`
+renderiza la onda y la barra a un PNG.
 
 Ojo: en GNOME 50 la opción `--nested` ya no existe (era la de siempre en
 las guías viejas); el modo anidado ahora es `--devkit`, y correr
@@ -91,6 +122,36 @@ gdbus call --session --dest org.gnome.Shell.Extensions \
 
 `'state': <1.0>` es habilitada y andando; `'error'` trae el mensaje si
 algo se rompió.
+
+### `disable` + `enable` NO recarga el código
+
+La trampa más cara de todas, porque falla en silencio y con toda la pinta
+de haber funcionado. GNOME cachea los módulos ES de la extensión: al
+re-habilitarla vuelve a correr **el que quedó en memoria**, no el del
+disco. No hay error, no hay warning, y el daemon hasta registra la
+reconexión del WebSocket — pero la hace el código viejo.
+
+O sea que esto **no sirve** para probar un cambio:
+
+```bash
+gnome-extensions disable boca@tero.local && gnome-extensions enable boca@tero.local
+```
+
+En Wayland la única forma de cargar código nuevo es cerrar sesión y
+volver a entrar (o el shell anidado de más arriba, que sí arranca de
+cero). Antes de gastar un logout conviene revisar el archivo entero: no
+hay segunda oportunidad sin gastar otro.
+
+Para confirmar qué versión quedó cargada, un `log()` al principio de
+`enable()` y después:
+
+```bash
+journalctl --user --since "1 minute ago" -o cat | grep boca
+```
+
+Ojo con `journalctl -f` redirigido a un archivo: se bufferea y puede
+devolver cero líneas aunque el mensaje esté. Conviene consultar el
+journal después del hecho, con `--since`, en vez de seguirlo en vivo.
 
 ## Estado
 

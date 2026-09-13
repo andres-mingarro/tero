@@ -16,9 +16,15 @@ const URL = 'ws://127.0.0.1:8765';
 const REINTENTO_MS = 1000;
 
 export class Enlace {
-    /** @param onMensaje recibe el objeto JSON ya parseado */
-    constructor(onMensaje) {
+    /**
+     * @param onMensaje recibe el objeto JSON ya parseado
+     * @param onConexion recibe true/false cuando cambia la conexión con el
+     *   daemon (no en cada reintento fallido)
+     */
+    constructor(onMensaje, onConexion = () => {}) {
         this._onMensaje = onMensaje;
+        this._onConexion = onConexion;
+        this._conectado = null;
         this._sesion = new Soup.Session();
         this._conexion = null;
         this._cancelable = null;
@@ -50,10 +56,12 @@ export class Enlace {
         } catch (e) {
             // Lo normal es que el daemon no esté levantado todavía: no es
             // un error que valga la pena loguear en cada reintento.
+            this._avisarConexion(false);
             this._programarReintento();
             return;
         }
         this._conexion = conexion;
+        this._avisarConexion(true);
         conexion.connect('message', (_c, tipo, datos) => {
             if (tipo !== Soup.WebsocketDataType.TEXT)
                 return;
@@ -65,11 +73,19 @@ export class Enlace {
         });
         conexion.connect('closed', () => {
             this._conexion = null;
+            this._avisarConexion(false);
             this._programarReintento();
         });
         conexion.connect('error', () => {
             this._conexion = null;
         });
+    }
+
+    _avisarConexion(conectado) {
+        if (this._cerrado || this._conectado === conectado)
+            return;
+        this._conectado = conectado;
+        this._onConexion(conectado);
     }
 
     _programarReintento() {

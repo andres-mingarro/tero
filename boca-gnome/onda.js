@@ -136,6 +136,16 @@ class Curva {
     }
 }
 
+/**
+ * Y del eje de la onda, donde vive el hilo horizontal tenue. La barra de
+ * progreso se apoya justo acá: en el original las dos se ven como una
+ * sola línea continua con el puntito de luz encima, así que el offset
+ * tiene que salir de un solo lado y no repetirse a mano.
+ */
+export function lineaBase(alto) {
+    return alto / 2 - 6;
+}
+
 export class Onda {
     constructor() {
         this._curvas = [new Curva(), new Curva(), new Curva()];
@@ -146,7 +156,7 @@ export class Onda {
      * @param colores un [r,g,b] por curva (tres)
      */
     dibujar(cr, ancho, alto, amplitud, velocidad, colores) {
-        const altoMax = alto / 2 - 6;
+        const altoMax = lineaBase(alto);
 
         cr.setOperator(Cairo.Operator.OVER);
         this._dibujarLineaBase(cr, ancho, altoMax);
