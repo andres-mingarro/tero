@@ -1,0 +1,39 @@
+# Servicio systemd de usuario para Tero. Resuelve el pendiente anotado en
+# CLAUDE.md ("Servicio: systemd user, no configurado todavía") y le da al
+# menú de configuración de GNOME (soul-connector-gnome/panel.js) algo
+# estable contra lo cual mandar start/stop/restart -- antes cada reinicio
+# durante el desarrollo era pkill + nohup a mano, frágil y sin forma de
+# consultar el estado desde otro proceso.
+#
+# Instalación (ver INSTALACIONES.md):
+#   ln -s ~/proyectos/tero/systemd/tero.service ~/.config/systemd/user/tero.service
+#   systemctl --user daemon-reload
+#   systemctl --user start tero      # arrancar ahora
+#   systemctl --user enable tero     # opcional: arrancar solo en cada login
+#
+# ./tero ya maneja señales de apagado correctamente (trap en INT/TERM que
+# corta el daemon y el soul-connector clásico si corresponde) y no
+# necesita una terminal -- por eso ExecStart apunta directo al script de
+# siempre, sin duplicar su lógica de arranque/logging acá.
+
+[Unit]
+Description=Tero (asistente de voz push-to-talk)
+# No es un servicio de arranque temprano del sistema: necesita el bus de
+# sesión, PipeWire y (si la extensión de GNOME está activa) el propio
+# gnome-shell ya corriendo para que el soul-connector tenga a quién
+# conectarse.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/proyectos/tero
+ExecStart=%h/proyectos/tero/tero
+# Nunca reiniciar solo: si salud.py cortó por RAM crítica (código 3) o el
+# daemon se cayó por un bug real, revivirlo automáticamente repetiría el
+# mismo problema en vez de dejar que el usuario lo vea y decida. Mismo
+# criterio que ya está documentado para salud.py: avisar, no auto-curar.
+Restart=no
+
+[Install]
+WantedBy=graphical-session.target

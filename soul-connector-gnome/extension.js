@@ -18,13 +18,16 @@
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {Onda, COLORES_ORIGINALES, lineaBase} from './onda.js';
 import {Barra} from './barra.js';
+import {Particulas} from './particulas.js';
 import {Arrastre, leerPosicion} from './mover.js';
 import {Enlace} from './enlace.js';
+import {TeroIndicator} from './panel.js';
 
 const ANCHO = 260;
 const ALTO = 74;
@@ -51,10 +54,15 @@ const COLORES = {
     pensando: [0xc7, 0x7d, 0xff],
     hablando: null, // multicolor original de la librería
     musica: [0x5c, 0xff, 0xd4],
+    // Cuando Tero delega en Codex/ChatGPT (fase 4): la onda queda cian y
+    // suben partículas de colores desde su eje, como pidió el usuario
+    // ("que dé la idea de asteroides") -- ver particulas.js.
+    codex: [0x00, 0xea, 0xff],
 };
 
 const AMPLITUD_IDLE = 0.15;
 const AMPLITUD_PENSANDO = 0.45;
+const AMPLITUD_CODEX = 0.55;
 
 // Suavizado asimétrico: ataque rápido, decaimiento más lento. El RMS crudo
 // tiembla, y esto es lo que separa "se ve pro" de "se ve amateur".
@@ -79,6 +87,7 @@ class SoulConnector {
         this._velocidad = 0.06;
         this._onda = new Onda();
         this._barra = new Barra();
+        this._particulas = new Particulas();
 
         this._cancion = null;
         this._fraccion = 0;
@@ -112,6 +121,29 @@ class SoulConnector {
         this._area = new St.DrawingArea({width: ANCHO, height: ALTO});
         this._area.connect('repaint', a => this._pintar(a));
         this._raiz.add_child(this._area);
+
+        // Dos capas para las partículas del estado "codex", no una: el
+        // halo sale de aplicarle un blur real (GPU, Shell.BlurEffect --
+        // lo mismo que usa gnome-shell para el fondo del overview) a
+        // TODA esta capa, y el núcleo nítido va aparte, sin blur, encima
+        // -- igual que hace `box-shadow` en CSS (sombra desenfocada
+        // detrás, elemento nítido delante). Iba a aproximar el blur a
+        // mano con Cairo (gradiente, anillos) y las dos veces se veía a
+        // esfera con sombreado -- ver particulas.js.
+        this._areaGlow = new St.DrawingArea({width: ANCHO, height: ALTO});
+        this._areaGlow.connect('repaint', a => this._pintarParticulasGlow(a));
+        // Radio más chico que el primer intento (10): un blur ancho sobre
+        // un puntito de 2-3px diluye demasiado el brillo (probado en
+        // vivo, casi no se veía). Con esto el halo queda más concentrado.
+        this._efectoBlur = new Shell.BlurEffect({
+            radius: 6, brightness: 1.0, mode: Shell.BlurMode.ACTOR,
+        });
+        this._areaGlow.add_effect(this._efectoBlur);
+        this._raiz.add_child(this._areaGlow);
+
+        this._areaParticulasNucleo = new St.DrawingArea({width: ANCHO, height: ALTO});
+        this._areaParticulasNucleo.connect('repaint', a => this._pintarParticulasNucleo(a));
+        this._raiz.add_child(this._areaParticulasNucleo);
 
         this._etiquetaCancion = new St.Label({
             style_class: 'tero-soul-connector-cancion',
@@ -182,6 +214,20 @@ class SoulConnector {
         cr.$dispose();
     }
 
+    _pintarParticulasGlow(area) {
+        const cr = area.get_context();
+        const [, alto] = area.get_surface_size();
+        this._particulas.dibujarGlow(cr, lineaBase(alto));
+        cr.$dispose();
+    }
+
+    _pintarParticulasNucleo(area) {
+        const cr = area.get_context();
+        const [, alto] = area.get_surface_size();
+        this._particulas.dibujarNucleos(cr, lineaBase(alto));
+        cr.$dispose();
+    }
+
     _pintarBarra(area) {
         const cr = area.get_context();
         const [ancho, alto] = area.get_surface_size();
@@ -197,6 +243,8 @@ class SoulConnector {
             return this._nivelCrudo;
         if (this._estado === 'pensando')
             return AMPLITUD_PENSANDO;
+        if (this._estado === 'codex')
+            return AMPLITUD_CODEX;
         return AMPLITUD_IDLE;
     }
 
@@ -218,10 +266,20 @@ class SoulConnector {
         // justo lo que se ve desacoplado del audio.
         if (SEGUIR_NIVEL.includes(this._estado))
             this._velocidad = 0.04 + this._nivelSuave * 0.18;
+        else if (this._estado === 'pensando')
+            this._velocidad = 0.12;
+        else if (this._estado === 'codex')
+            this._velocidad = 0.16; // más viva que "pensando": es el estado "energizado"
         else
-            this._velocidad = this._estado === 'pensando' ? 0.12 : 0.06;
+            this._velocidad = 0.06;
 
         this._area.queue_repaint();
+        // Una sola vez acá, no adentro de cada _pintarParticulas*: las dos
+        // capas tienen que pintar la MISMA lista de partículas en el
+        // mismo estado, no cada una la suya (ver particulas.js).
+        this._particulas.actualizar(this._estado === 'codex', ANCHO);
+        this._areaGlow.queue_repaint();
+        this._areaParticulasNucleo.queue_repaint();
         this._actualizarProgreso();
         return GLib.SOURCE_CONTINUE;
     }
@@ -289,7 +347,10 @@ class SoulConnector {
         this._duracionMs = info.duracion_ms;
         this._recibidoEn = GLib.get_monotonic_time() / 1000;
         this._etiquetaCancion.ease({opacity: 180, duration: 600});
-        this._filaProgreso.ease({opacity: 255, duration: 600});
+        // Sin duración real (un canal de YouTube en vivo, no una canción
+        // con punta y final) se oculta la fila de tiempo/barra -- mostrarla
+        // fija en 0:00/0:00 se ve roto, no "en vivo".
+        this._filaProgreso.ease({opacity: info.duracion_ms ? 255 : 0, duration: 600});
     }
 
     _actualizarProgreso() {
@@ -349,6 +410,8 @@ export default class SoulConnectorExtension extends Extension {
         // se va, cambia de lado o cambia de tamaño.
         this._idAreas = global.display.connect(
             'workareas-changed', () => this._ubicar());
+
+        this._panel = new TeroIndicator();
     }
 
     _ubicar() {
@@ -398,6 +461,10 @@ export default class SoulConnectorExtension extends Extension {
             Main.layoutManager.removeChrome(this._soulConnector.actor);
             this._soulConnector.destruir();
             this._soulConnector = null;
+        }
+        if (this._panel) {
+            this._panel.destruir();
+            this._panel = null;
         }
     }
 }

@@ -26,6 +26,7 @@ import GLib from 'gi://GLib';
 
 import {Onda, lineaBase} from './onda.js';
 import {Barra} from './barra.js';
+import {Particulas} from './particulas.js';
 
 const ANCHO = 260;
 const ALTO = 74;
@@ -38,6 +39,7 @@ const COLORES = {
     escuchando: [0xff, 0xff, 0xff],
     pensando: [0xc7, 0x7d, 0xff],
     musica: [0x5c, 0xff, 0xd4],
+    codex: [0x00, 0xea, 0xff],
 };
 
 // Un gris de escritorio para que se vea algo: el soul-connector de verdad va sobre
@@ -46,7 +48,7 @@ const FONDO = [0.12, 0.12, 0.13];
 
 const ESCALA = 3; // el PNG sale ampliado, si no no se distingue nada
 
-function dibujarEscena(cr, {estado, amplitud, fraccion, pausado, cancion}) {
+function dibujarEscena(cr, {estado, amplitud, fraccion, pausado, cancion, particulas}) {
     cr.setSourceRGB(...FONDO);
     cr.paint();
 
@@ -61,6 +63,27 @@ function dibujarEscena(cr, {estado, amplitud, fraccion, pausado, cancion}) {
     for (let i = 0; i < 120; i++)
         onda.dibujar(borrador, ANCHO, ALTO, amplitud, 0.1, [color, color, color]);
     onda.dibujar(cr, ANCHO, ALTO, amplitud, 0.1, [color, color, color]);
+
+    if (particulas) {
+        // OJO: esto solo sirve para revisar densidad/posiciones/tiempos.
+        // El glow de verdad sale de un Shell.BlurEffect (GPU) que solo
+        // existe corriendo adentro de gnome-shell -- acá no hay manera de
+        // simularlo, así que se dibuja nomás la capa de núcleos, sin
+        // blur. Para ver el efecto completo hay que mirarlo en
+        // probar.sh o en la sesión real.
+        //
+        // actualizar() usa Date.now() real, así que para ver varias
+        // nacidas en distintos instantes (no una sola, recién nacida) hay
+        // que dejar pasar tiempo real de verdad.
+        const yLinea = lineaBase(ALTO);
+        const pasos = 14;
+        for (let i = 0; i < pasos; i++) {
+            particulas.actualizar(true, ANCHO);
+            GLib.usleep(70000);
+        }
+        particulas.actualizar(true, ANCHO);
+        particulas.dibujarNucleos(cr, yLinea);
+    }
 
     if (fraccion !== null) {
         const yLinea = lineaBase(ALTO);
@@ -88,6 +111,8 @@ function dibujarEscena(cr, {estado, amplitud, fraccion, pausado, cancion}) {
 }
 
 const ESCENAS = [
+    {nombre: 'codex', estado: 'codex', amplitud: 0.55, fraccion: null,
+     particulas: new Particulas()},
     {nombre: 'musica', estado: 'musica', amplitud: 0.55, fraccion: 0.42,
      pausado: false, cancion: 'The Downfall of Us All · A Day To Remember'},
     {nombre: 'arranque', estado: 'musica', amplitud: 0.55, fraccion: 0.03,

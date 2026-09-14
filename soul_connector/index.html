@@ -175,6 +175,29 @@
   @media (prefers-reduced-motion: reduce) {
     #barra-relleno { animation: none; }
   }
+
+  /* Partículas del estado "codex" (Tero delegando en Codex/ChatGPT):
+     nacen en el eje de la onda y suben apagándose, idea de un demo que
+     pasó el usuario (`@keyframes rise` full-screen) -- acá el "arriba" es
+     la punta de una onda de 74px, no la pantalla entera, así que la
+     distancia y la duración se achican en proporción. */
+  .tero-particula {
+    position: absolute;
+    bottom: 43px; /* altura del eje de la onda dentro de los 74px */
+    left: var(--left);
+    width: var(--size);
+    height: var(--size);
+    border-radius: 50%;
+    pointer-events: none;
+    background: var(--color);
+    box-shadow: 0 0 6px var(--color), 0 0 12px var(--color);
+    animation: tero-particula-sube var(--duracion) linear forwards;
+  }
+  @keyframes tero-particula-sube {
+    0% { opacity: 0; transform: translate(0, 0) scale(0.3); }
+    15% { opacity: 1; }
+    100% { opacity: 0; transform: translate(var(--deriva), -46px) scale(1); }
+  }
 </style>
 </head>
 <body>
@@ -205,7 +228,39 @@ const COLORES = {
   pensando:    "#c77dff",
   hablando:    "#7c5cff",
   musica:      "#5cffd4",
+  codex:       "#00eaff",
 };
+
+// Mismo acento que el demo de partículas: cian, violeta, rosa, blanco.
+const PALETA_PARTICULAS = ["#00eaff", "#7b61ff", "#ff3cac", "#ffffff"];
+let intervaloParticulas = null;
+
+function crearParticula() {
+  const particula = document.createElement("span");
+  particula.className = "tero-particula";
+  particula.style.setProperty("--size", `${Math.random() * 4 + 2}px`);
+  particula.style.setProperty("--left", `${Math.random() * 240 + 10}px`);
+  particula.style.setProperty("--duracion", `${Math.random() * 0.7 + 0.6}s`);
+  particula.style.setProperty("--deriva", `${Math.random() * 32 - 16}px`);
+  particula.style.setProperty(
+    "--color",
+    PALETA_PARTICULAS[Math.floor(Math.random() * PALETA_PARTICULAS.length)]
+  );
+  document.getElementById("onda-wrapper").appendChild(particula);
+  particula.addEventListener("animationend", () => particula.remove());
+}
+
+function empezarParticulas() {
+  if (intervaloParticulas !== null) return;
+  intervaloParticulas = setInterval(crearParticula, 45);
+}
+
+function pararParticulas() {
+  if (intervaloParticulas !== null) {
+    clearInterval(intervaloParticulas);
+    intervaloParticulas = null;
+  }
+}
 
 const AMPLITUD_IDLE = 0.15;
 const AMPLITUD_PENSANDO = 0.45;
@@ -293,6 +348,7 @@ const COLORES_ORIGINALES_CURVAS = wave.curves.map((c) => c.definition.color);
 
 function aplicarEstado(nuevo) {
   const eraHablando = estado === "hablando";
+  const eraCodex = estado === "codex";
   estado = nuevo;
   wave.setSpeed(estado === "pensando" ? 0.12 : 0.06);
   const color = COLORES[estado] || COLORES.idle;
@@ -312,6 +368,11 @@ function aplicarEstado(nuevo) {
     empezarATraerAlFrente();
   } else if (estado !== "hablando" && eraHablando) {
     dejarDeTraerAlFrente();
+  }
+  if (estado === "codex" && !eraCodex) {
+    empezarParticulas();
+  } else if (estado !== "codex" && eraCodex) {
+    pararParticulas();
   }
 }
 // Recién acá es seguro llamarla: ya existen COLORES_ORIGINALES_CURVAS y

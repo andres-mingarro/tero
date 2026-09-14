@@ -41,6 +41,11 @@ audio abierta consumiendo cuota. La tecla marca inicio y fin.
 - Pulsación corta = toggle (para dictados largos).
 - Tecla sugerida: una que no se use nunca (`Pause`, `Menu`, `ScrollLock`)
   o `Super+Espacio`.
+- **Barge-in**: si se aprieta la tecla mientras Tero está hablando, corta
+  el audio al toque y arranca a grabar de una, sin esperar a que termine
+  la frase (`main.py`, `on_down`/`voz/tts.py`). Apretarla mientras todavía
+  está transcribiendo/pensando (nada sonando todavía) se ignora a
+  propósito, para no tener dos turnos procesándose en paralelo.
 
 ### Cerebro: modelo local + Codex como herramienta
 
@@ -129,7 +134,7 @@ pantalla ni la terminal, ver más abajo). Se activó Zero Data Retention en
 la cuenta para que no la retengan. Decisión del usuario, sabiendo esto —
 lo que le importa proteger es la comprensión de frases libres, no el
 conocimiento general del modelo (ver charla del 2026-09-13).
-| Servicio | — | Task Scheduler | systemd user (no configurado todavía) |
+| Servicio | — | Task Scheduler | systemd user ✅ (`systemd/tero.service`, ver más abajo) |
 
 `modelo small` se probó primero pero alucinaba nombres propios (Trelew,
 artistas); se subió a `large-v3` a pedido explícito del usuario
@@ -149,9 +154,9 @@ tero/
   voz/               stt.py, tts.py
   cerebro/           router.py, prompt.py
   herramientas/      musica.py, clima.py, web.py, mapas.py, celular.py,
-                     terminal.py, tiempo.py, volumen.py,
+                     terminal.py, tiempo.py, volumen.py, youtube.py,
                      _spotify_auth.py, _telegram.py, _ducking.py,
-                     codex.py (fase 4)
+                     _pantalla_youtube.py, codex.py (fase 4)
   soul_connector/    server.py, ventana.py, audio_sistema.py, index.html,
                      siriwave.umd.js (vendorizada)
   soul-connector-gnome/  extension.js, onda.js, barra.js, mover.js, enlace.js
@@ -188,6 +193,7 @@ herramientas = [
   reproducir_musica, reproducir_musica_aleatoria, control_media,
   consultar_clima, abrir_url, buscar_en_sitio, ajustar_volumen,
   leer_terminal, consultar_hora, calcular_viaje, mandar_al_celular,
+  reproducir_canal_youtube, abrir_youtube_general, sugerir_canales_youtube,
   capturar_pantalla, delegar_a_codex          # salida de escape
 ]
 ```
@@ -216,19 +222,25 @@ Notas por herramienta:
   requiere tenerlo instalado, no viene por defecto. Requiere Spotify
   Premium (la Web API no deja reproducir en cuentas free).
   **Ducking** (`herramientas/_ducking.py`, no es una herramienta del
-  modelo): mientras Tero escucha/piensa/habla, la música baja al 10% —
-  progresivo, no de golpe — y vuelve sola al volumen real al terminar
-  (no entre "pensando" y "hablando": si hay que hablar, se queda abajo
-  hasta el final para no pegar un salto para arriba y otro para abajo
-  antes de contestar). Dos vías descartadas en el camino: `playerctl
-  volume` no sirve porque el cliente de Spotify para Linux no implementa
-  `SetVolume` vía MPRIS (éxito reportado, cero efecto real); la Web API
-  de Spotify (`/me/player/volume`) sí cambia el volumen pero
-  `/me/player/devices` tarda 1-3s en reflejarlo (eventual consistency),
-  demasiado lento para una rampa. Lo que funciona: el propio volumen del
-  stream de Spotify en PipeWire (`wpctl status` → "Streams", node id
-  propio, no el sink del sistema) — instantáneo y no toca el sink que
-  usa el TTS para salir.
+  modelo): mientras Tero escucha/piensa/habla, **todo lo que esté
+  sonando en el sistema** baja al 10% — progresivo, no de golpe, regla
+  global desde el 2026-09-14 (no una lista de apps conocidas: empezó
+  siendo solo Spotify, después se sumó a mano la ventana de YouTube, y
+  terminó siendo "cualquier audio" a pedido explícito del usuario) — y
+  vuelve solo al volumen real al terminar (no entre "pensando" y
+  "hablando": si hay que hablar, se queda abajo hasta el final para no
+  pegar un salto para arriba y otro para abajo antes de contestar). Se
+  identifica cada stream activo (`state=="running"`) vía `pw-dump`,
+  salvo el del propio proceso de Tero (TTS/beeps, por PID) para no
+  duckearse a sí mismo. Dos vías descartadas en el camino para mover el
+  volumen: `playerctl volume` no sirve porque el cliente de Spotify para
+  Linux no implementa `SetVolume` vía MPRIS (éxito reportado, cero
+  efecto real); la Web API de Spotify (`/me/player/volume`) sí cambia el
+  volumen pero `/me/player/devices` tarda 1-3s en reflejarlo (eventual
+  consistency), demasiado lento para una rampa. Lo que funciona: el
+  propio volumen de cada stream de salida en PipeWire (`wpctl status` →
+  "Streams", node id propio, no el sink del sistema) — instantáneo y no
+  toca el sink que usa el TTS para salir.
 - **Mapas**: `calcular_viaje` geocodifica con Open-Meteo (misma API que el
   clima, sin clave) y calcula distancia/tiempo real con el servidor demo
   de OSRM (gratis, sin clave), devolviendo también la URL real de Google
@@ -236,6 +248,22 @@ Notas por herramienta:
 - **Celular**: `mandar_al_celular` manda texto/links al celular del
   usuario vía un bot de Telegram personal (`herramientas/_telegram.py`) —
   se eligió sobre GSConnect/Google Chat por simplicidad de setup.
+- **YouTube**: `reproducir_canal_youtube` abre en vivo uno de siete
+  canales mapeados a mano (Olga, Radio Mitre, Urbana Play, Parén la Mano,
+  Aislados, Midu, Vorterix — `herramientas/youtube.py`) cuando el usuario
+  nombra uno puntual. Arranca solo con sonido gracias a
+  `--autoplay-policy=no-user-gesture-required` (sin esto, Chrome bloquea
+  el autoplay con sonido en un perfil sin historial de interacción, que
+  es siempre el caso de este perfil dedicado). Sin canal nombrado, `abrir_youtube_general` abre la home y
+  pregunta específico vs. novedades (única excepción a "nunca preguntar",
+  ver `cerebro/prompt.py`); `sugerir_canales_youtube` responde esa
+  pregunta chequeando en vivo (`/live` de cada canal) y, de respaldo, el
+  feed RSS por si subieron algo sin estar en vivo. Se abre siempre en una
+  ventana de Chrome dedicada, fija en un monitor del escritorio del
+  usuario (`herramientas/_pantalla_youtube.py`) — necesita forzar
+  `--ozone-platform=x11` porque el Chrome nativo de Wayland no deja
+  posicionar la ventana por código (ver detalle en `BITACORA.html`,
+  2026-09-14).
 - **Web / MercadoLibre**: **no** hacer un agente con navegador. El modelo
   arma la URL y se abre. Es instantáneo y no se rompe:
   `listado.mercadolibre.com.ar/zapatillas-adidas-talle-44`
@@ -326,6 +354,32 @@ describe la implementación original en pywebview.
 
 **El daemon tiene que funcionar sin el soul-connector.** La ventana es un
 cliente opcional del stream de niveles.
+
+---
+
+## Servicio systemd y menú de GNOME ✅
+
+`systemd/tero.service` (unidad de usuario, `Restart=no` a propósito —
+mismo criterio que `salud.py`: avisar, no revivir solo si cortó por algo
+real) envuelve `./tero` sin duplicar su lógica de arranque/logging. Se
+instala con un symlink:
+
+```
+ln -s ~/proyectos/tero/systemd/tero.service ~/.config/systemd/user/tero.service
+systemctl --user daemon-reload
+systemctl --user start tero      # arrancar ahora
+systemctl --user enable tero     # opcional: arrancar solo en cada login (no activado por defecto)
+```
+
+Si la extensión de GNOME del soul-connector está activa,
+`soul-connector-gnome/panel.js` agrega un toggle "Tero" al menú rápido de
+GNOME (el de WiFi/Bluetooth/etc., arriba a la derecha) con Iniciar/
+Reiniciar/Cerrar/Ver log, controlando este mismo servicio por
+`systemctl --user` — relee el estado real cada 4s en vez de confiar en
+el último click, así que si `salud.py` corta a Tero solo o alguien lo
+para desde una terminal, el toggle lo nota igual. Es una pieza aparte de
+`extension.js` (se instancia en `enable()`/`disable()` junto con la
+onda), no depende de que el soul-connector esté dibujándose.
 
 ---
 

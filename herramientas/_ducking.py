@@ -1,5 +1,11 @@
-"""Ducking de música: baja el volumen de Spotify mientras Tero escucha,
-piensa o habla, y lo devuelve al volumen real al volver a idle.
+"""Ducking: baja el volumen de **cualquier cosa que esté sonando** en el
+sistema mientras Tero escucha, piensa o habla, y lo devuelve al volumen
+real al volver a idle. Regla global a propósito, no una lista de
+aplicaciones conocidas (Spotify, la ventana de YouTube) -- un pedido
+explícito del usuario tras ver que YouTube tapaba su voz igual que
+Spotify, con el mismo problema de fondo: cualquier audio a volumen normal
+le gana al micrófono y arruina el STT, sea cual sea la app. Se duckea
+todo salvo la salida del propio Tero (TTS/beeps), identificada por PID.
 
 Dos enfoques descartados, probados en vivo:
 
@@ -30,28 +36,42 @@ la rampa para calcular el siguiente (en vez de llevar la cuenta uno
 mismo) hace que se trabe apenas la diferencia baja de ~0.01 -- el paso
 calculado es más chico que la resolución de lectura, wpctl devuelve
 siempre el mismo valor redondeado, y la rampa nunca converge. Por eso acá
-se lee una sola vez por proceso (bootstrap, antes de tocar nada) y de ahí
-en más el propio Ducker es la única fuente de verdad de "dónde está el
+se lee una sola vez **por ciclo completo** (bootstrap al primer `activar()`
+después de haber vuelto a idle, nunca en medio de una rampa) y de ahí en
+más el propio Ducker es la única fuente de verdad de "dónde está el
 volumen ahora": son sus propios `_set_volumen_nodo` los que lo mueven, sin
-volver a preguntarle a wpctl.
+volver a preguntarle a wpctl. El bootstrap se repite en cada ciclo (no
+solo la primera vez del proceso) para no arrastrar el volumen real de una
+app vieja a una app distinta que empezó a sonar después.
 """
 
 import json
+import os
 import subprocess
 import threading
 import time
 
 _VOLUMEN_DUCKED = 0.10
 _PASO_S = 0.02
-# Bajar rápido (tapar la música antes de que el mic termine de abrirse) y
-# subir despacio (que no se note el regreso) -- mismo criterio de
-# suavizado asimétrico que ya se usa en el soul-connector para el RMS.
-_FACTOR_BAJADA = 0.35
-_FACTOR_SUBIDA = 0.12
+# Bajar más rápido que subir (tapar la música antes de que el mic termine
+# de abrirse) y subir bien despacio (que no se note el regreso) -- mismo
+# criterio de suavizado asimétrico que ya se usa en el soul-connector
+# para el RMS. Factores bajados el 2026-09-14 (0.35/0.12 originales
+# sonaban a corte seco, "muy pronunciado" según el usuario) -- 0.22 sigue
+# terminando la bajada en well under medio segundo, así que no vuelve a
+# abrir la ventana de audio sucio en el mic que motivó el ducking global
+# (ver encabezado del módulo); 0.05 hace un regreso bien gradual, de un
+# par de segundos, que ya no tiene esa restricción de tiempo.
+_FACTOR_BAJADA = 0.22
+_FACTOR_SUBIDA = 0.05
 _UMBRAL_LISTO = 0.004
 
 
-def _nodos_spotify() -> list[int]:
+def _nodos_a_duckear() -> list[int]:
+    """Todo stream de salida de audio realmente sonando (`state=="running"`)
+    ahora mismo, de cualquier aplicación, salvo el del propio proceso de
+    Tero (el TTS y los beeps también son streams de PipeWire, y duckearse
+    a sí mismo cortaría la propia voz)."""
     try:
         resultado = subprocess.run(
             ["pw-dump"], capture_output=True, text=True, check=False, timeout=2.0
@@ -59,13 +79,17 @@ def _nodos_spotify() -> list[int]:
         nodos = json.loads(resultado.stdout)
     except Exception:
         return []
+    propio_pid = os.getpid()
     ids = []
     for nodo in nodos:
         info = nodo.get("info") or {}
         props = info.get("props") or {}
-        es_salida_de_audio = props.get("media.class") == "Stream/Output/Audio"
-        if es_salida_de_audio and props.get("application.name") == "Spotify" and info.get("state"):
-            ids.append(nodo["id"])
+        if props.get("media.class") != "Stream/Output/Audio" or info.get("state") != "running":
+            continue
+        pid = props.get("application.process.id")
+        if pid is not None and int(pid) == propio_pid:
+            continue
+        ids.append(nodo["id"])
     return ids
 
 
@@ -115,7 +139,7 @@ class Ducker:
         """Llamar al volver a idle."""
         with self._lock:
             if self._volumen_real is None:
-                return  # nunca se llegó a activar (no había Spotify sonando)
+                return  # nunca se llegó a activar (no había nada sonando)
             self._objetivo = self._volumen_real
             self._asegurar_hilo()
 
@@ -125,7 +149,12 @@ class Ducker:
             self._hilo.start()
 
     def _rampa(self) -> None:
-        nodos = _nodos_spotify()
+        # Si Spotify y YouTube suenan a la vez con volúmenes reales
+        # distintos, esto los empareja al del primer nodo encontrado en
+        # vez de llevar una rampa independiente por nodo -- caso raro (lo
+        # normal es que suene una sola cosa a la vez) y no vale la pena
+        # la complejidad de trackear varias rampas en paralelo por ahora.
+        nodos = _nodos_a_duckear()
         if not nodos:
             with self._lock:
                 self._objetivo = None
@@ -157,6 +186,18 @@ class Ducker:
                     _set_volumen_nodo(id_, actual)
                 with self._lock:
                     self._actual = actual
+                    if actual == self._volumen_real:
+                        # Se completó una vuelta entera (bajó y volvió a
+                        # subir hasta el real): se olvida el bootstrap
+                        # para que la próxima activación relea el volumen
+                        # real de cero. Con ducking global (no solo
+                        # Spotify) esto importa más que antes -- entre
+                        # una conversación y la siguiente puede haber
+                        # arrancado una app nueva con su propio volumen,
+                        # y sin este reset se le aplicaría el valor viejo
+                        # de otra cosa en vez del suyo.
+                        self._actual = None
+                        self._volumen_real = None
                 return
             factor = _FACTOR_BAJADA if objetivo < actual else _FACTOR_SUBIDA
             actual += (objetivo - actual) * factor

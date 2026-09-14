@@ -33,6 +33,7 @@ def _asegurar_libs_cuda() -> None:
 
 _asegurar_libs_cuda()
 
+import threading
 import time
 import tomllib
 from pathlib import Path
@@ -44,7 +45,7 @@ import salud
 from soul_connector.audio_sistema import MonitorAudioSistema
 from soul_connector.server import ServidorSoulConnector
 from cerebro.router import Cerebro
-from herramientas import musica
+from herramientas import musica, youtube
 from herramientas._ducking import Ducker
 from plataforma import crear_plataforma
 from voz.stt import LocalSTT, STTHibrido, groq_configurado
@@ -161,6 +162,11 @@ class Tero:
         self._modo_toggle = False
         self._tiempo_down = 0.0
         self._umbral_toggle_s = config["tecla"]["umbral_toggle_s"]
+        # Barge-in: se activa en on_down si en ese momento _estado_voz es
+        # "hablando" -- voz/tts.py lo revisa en cada bloque de audio y
+        # corta ya mismo. Se limpia al arrancar cada _procesar() propio,
+        # así cada turno arranca con la bandera en cero para su propio TTS.
+        self._cancelar_tts = threading.Event()
 
         self._ultimo_poll_cancion = 0.0
         # Cuándo empezó la pausa actual (None si no está pausado o no hay
@@ -228,13 +234,29 @@ class Tero:
             self._soul_connector.estado("idle")
 
     def on_down(self) -> None:
-        if not self._grabando:
-            self._tiempo_down = time.monotonic()
-            self._grabando = True
-            self._modo_toggle = False
-            _beep(880)
-            self._estado_soul_connector("escuchando")
-            self._grabador.iniciar()
+        if self._grabando:
+            return
+        if self._estado_voz == "pensando":
+            # Transcribiendo o esperando al cerebro: todavía no hay nada
+            # sonando que cortar, y arrancar a grabar en paralelo pisaría
+            # el turno en curso (dos _procesar() a la vez, dos TTS
+            # compitiendo). Se ignora el toque hasta que pase a "hablando"
+            # o vuelva a "idle" -- ver barge-in más abajo para el caso que
+            # sí se puede interrumpir.
+            return
+        if self._estado_voz == "hablando":
+            # Barge-in: no esperar a que termine de hablar. voz/tts.py
+            # revisa esta bandera en cada bloque de audio y corta el
+            # sonido ya mismo (ver TTS.hablar). El propio _procesar() del
+            # turno interrumpido nota que se canceló y no pisa el estado
+            # "escuchando" que se pone dos líneas más abajo.
+            self._cancelar_tts.set()
+        self._tiempo_down = time.monotonic()
+        self._grabando = True
+        self._modo_toggle = False
+        _beep(880)
+        self._estado_soul_connector("escuchando")
+        self._grabador.iniciar()
 
     def on_up(self) -> None:
         if not self._grabando:
@@ -250,7 +272,11 @@ class Tero:
         self._modo_toggle = False
         _beep(440)
         audio = self._grabador.detener()
-        self._procesar(audio)
+        # En un hilo aparte: así el hilo que lee la tecla (plataforma/linux.py)
+        # queda libre para notar un nuevo apretón mientras STT/cerebro/TTS
+        # corren -- sin esto, el barge-in de on_down no podría dispararse
+        # nunca porque el mismo hilo estaría ocupado adentro de _procesar().
+        threading.Thread(target=self._procesar, args=(audio,), daemon=True).start()
 
     def _procesar(self, audio: np.ndarray) -> None:
         if audio.size < self._config["audio"]["muestreo_hz"] * 0.2:
@@ -267,6 +293,7 @@ class Tero:
             self._plataforma.notificar("(silencio: ¿el micrófono está apagado?)")
             self._estado_soul_connector("idle")
             return
+        self._cancelar_tts.clear()
         self._estado_soul_connector("pensando")
         t0 = time.monotonic()
         texto = self._stt.transcribir(audio)
@@ -284,8 +311,11 @@ class Tero:
             self._estado_soul_connector("idle")
             return
         self._estado_soul_connector("hablando")
-        self._tts.hablar(respuesta, on_nivel=self._nivel_soul_connector)
-        self._estado_soul_connector("idle")
+        self._tts.hablar(respuesta, on_nivel=self._nivel_soul_connector, cancelar=self._cancelar_tts)
+        if not self._cancelar_tts.is_set():
+            self._estado_soul_connector("idle")
+        # Si se canceló, on_down ya puso el estado en "escuchando" para el
+        # turno que interrumpió a este -- no pisarlo con "idle" acá.
         t3 = time.monotonic()
         print(f"tts ({t3 - t2:.2f}s), total ({t3 - t0:.2f}s)")
 
@@ -333,6 +363,12 @@ class Tero:
             return
         self._ultimo_poll_cancion = ahora
         info = musica.estado_reproduccion()
+        if info is None:
+            # Nada sonando en Spotify: si hay un canal de YouTube abierto,
+            # mostrar eso en su lugar -- mismo casillero de la interfaz,
+            # una sola cosa a la vez (Spotify tiene prioridad si las dos
+            # cosas están activas, caso raro).
+            info = youtube.estado_actual()
         if info is None or info["reproduciendo"]:
             self._pausado_desde = None
         else:

@@ -25,6 +25,7 @@ puro. Instalar un paquete de sistema solo cuando de verdad no hay otra.
 | `playerctl` | `sudo apt install playerctl` | `control_media`: play/pausa/siguiente vía MPRIS (D-Bus) | `sudo apt remove playerctl` |
 | `wmctrl` | `sudo apt install wmctrl` | El soul-connector **clásico** (pywebview): pedirle a Mutter "siempre encima" (`-b add,above`) para la ventana, de forma más persistente que el flag `on_top` de Qt. El soul-connector como extensión de GNOME (`soul-connector-gnome/`) no lo necesita — vive en la capa de *chrome* del shell, siempre encima sin pedirlo | `sudo apt remove wmctrl` |
 | `libxcb-cursor0`, `libxcb-icccm4`, `libxcb-keysyms1` | `sudo apt install libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1` | El soul-connector clásico: dependencias del plugin `xcb` de Qt, para correr vía `QT_QPA_PLATFORM=xcb` (XWayland) — la sesión es Wayland nativo, donde `wmctrl` no ve ninguna ventana | `sudo apt remove libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1` |
+| Servicio systemd de usuario `tero.service` | `ln -s ~/proyectos/tero/systemd/tero.service ~/.config/systemd/user/tero.service && systemctl --user daemon-reload` | Arrancar/parar/reiniciar Tero por `systemctl --user` en vez de `pkill`/`nohup` a mano — es lo que usa el toggle "Tero" del menú rápido de GNOME (`soul-connector-gnome/panel.js`, 2026-09-14). No autoarranca en el login salvo que se corra además `systemctl --user enable tero` | `systemctl --user disable --now tero; rm ~/.config/systemd/user/tero.service` |
 
 ## Cuentas / apps externas registradas
 

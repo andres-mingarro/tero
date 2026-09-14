@@ -25,6 +25,7 @@ import herramientas.terminal  # noqa: F401
 import herramientas.tiempo  # noqa: F401
 import herramientas.volumen  # noqa: F401
 import herramientas.web  # noqa: F401
+import herramientas.youtube  # noqa: F401
 from cerebro.prompt import PROMPT_SISTEMA
 from herramientas import catalogo, ejecutar, es_error
 

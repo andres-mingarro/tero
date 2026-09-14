@@ -1,5 +1,6 @@
 """Síntesis de voz local con Piper."""
 
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -22,19 +23,33 @@ class TTS:
             )
         self._voz = PiperVoice.load(modelo)
 
-    def hablar(self, texto: str, on_nivel: Callable[[float], None] | None = None) -> None:
+    def hablar(
+        self,
+        texto: str,
+        on_nivel: Callable[[float], None] | None = None,
+        cancelar: threading.Event | None = None,
+    ) -> None:
         """on_nivel: callback opcional, RMS (0-1 aprox) cada _VENTANA_NIVEL_S
-        segundos durante la reproducción -- lo usa el soul-connector para animarse."""
+        segundos durante la reproducción -- lo usa el soul-connector para animarse.
+        cancelar: si se pasa y se activa mientras se habla (ej. el usuario
+        apretó la tecla para interrumpir), corta el audio ya mismo y no
+        sintetiza los trozos de texto que faltaban -- ver main.py, on_down."""
         for trozo in self._voz.synthesize(texto):
+            if cancelar is not None and cancelar.is_set():
+                return
             audio = trozo.audio_float_array
             if on_nivel is None:
                 sd.play(audio, samplerate=trozo.sample_rate)
                 sd.wait()
             else:
-                self._reproducir_con_nivel(audio, trozo.sample_rate, on_nivel)
+                self._reproducir_con_nivel(audio, trozo.sample_rate, on_nivel, cancelar)
 
     def _reproducir_con_nivel(
-        self, audio: np.ndarray, samplerate: int, on_nivel: Callable[[float], None]
+        self,
+        audio: np.ndarray,
+        samplerate: int,
+        on_nivel: Callable[[float], None],
+        cancelar: threading.Event | None = None,
     ) -> None:
         """Reproduce con un OutputStream + callback (continuo, sin los
         micro-cortes de trocear con sd.play()/wait() repetidos) y va
@@ -45,6 +60,11 @@ class TTS:
 
         def callback(outdata, frames, tiempo, status):
             nonlocal posicion, terminado
+            if cancelar is not None and cancelar.is_set():
+                # CallbackAbort corta ya, sin esperar a que termine de sonar
+                # lo que ya está en el buffer de salida (a diferencia de
+                # CallbackStop) -- es lo que hace que "se calle" al toque.
+                raise sd.CallbackAbort
             bloque = audio[posicion : posicion + frames]
             outdata[: len(bloque), 0] = bloque
             if len(bloque) < frames:
