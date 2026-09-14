@@ -30,6 +30,8 @@ from pathlib import Path
 
 import httpx
 
+from herramientas import _pantalla_youtube
+
 _RUTA = Path.home() / ".config" / "tero" / "youtube_canales.json"
 
 # Punto de partida, no un techo: los siete canales que el usuario ya
@@ -74,7 +76,15 @@ def _guardar(datos: dict) -> None:
 def buscar_aprendido(texto: str) -> dict | None:
     """El canal ya conocido más parecido a `texto` (por nombre, no id),
     o None si ninguno se acerca lo suficiente -- ahí es cuando
-    reproducir_canal_youtube tiene que salir a buscar en vivo."""
+    reproducir_canal_youtube tiene que salir a buscar en vivo.
+
+    A propósito compara la frase entera, no palabra por palabra: se
+    probó separar en palabras para tolerar muletillas ("Bueno,
+    Bortelix" en vez de solo "Bortelix") y se descartó -- "hola" contra
+    "olga" da 0.75 de parecido (mismas cuatro letras), idéntico al de
+    "bortelix" contra "vorterix", así que esa vía abría el canal de
+    Olga cada vez que alguien decía "hola, ¿cómo estás?". Con umbrales
+    de texto simple, más permisivo no es más general, es más frágil."""
     objetivo = _normalizar(texto)
     mejor, mejor_ratio = None, 0.0
     for clave, info in _cargar().items():
@@ -82,6 +92,24 @@ def buscar_aprendido(texto: str) -> dict | None:
         if ratio > mejor_ratio:
             mejor, mejor_ratio = info, ratio
     return mejor if mejor_ratio >= _UMBRAL_PARECIDO else None
+
+
+def abrir_si_conocido(texto: str) -> str | None:
+    """Si `texto` se parece a un canal ya aprendido, lo abre y devuelve
+    la frase de confirmación; None si no hay nada parecido (no hace
+    nada en ese caso). Un solo lugar para esta lógica -- la usan tanto
+    `reproducir_musica` (herramientas/musica.py, "poné X" es ambiguo
+    entre canción y canal) como `cerebro/router.py` (red de seguridad
+    para cuando la transcripción salió tan mal que ni el verbo del
+    pedido sobrevivió -- ver BITACORA.html, 2026-09-14: pedirle al
+    modelo que reconstruya el verbo por prompt desestabilizó el tool
+    calling, así que esto se resuelve en código, no en el prompt)."""
+    canal = buscar_aprendido(texto)
+    if canal is None:
+        return None
+    recordar(canal["handle"], canal["id"], canal["nombre"])
+    _pantalla_youtube.mostrar(f"https://www.youtube.com/@{canal['handle']}/live")
+    return f"Abrí {canal['nombre']} en vivo."
 
 
 def recordar(handle: str, id_canal: str, nombre: str) -> None:

@@ -182,11 +182,9 @@ def reproducir_musica(busqueda: str) -> str:
     # canal conocido, gana por sobre buscarlo como canción -- evita que
     # "Poné Vorterix" termine poniendo cualquier cosa de Spotify que se
     # le parezca en vez de abrir el canal de verdad (pasó en vivo).
-    canal = _youtube_favoritos.buscar_aprendido(busqueda)
-    if canal is not None:
-        _youtube_favoritos.recordar(canal["handle"], canal["id"], canal["nombre"])
-        _pantalla_youtube.mostrar(f"https://www.youtube.com/@{canal['handle']}/live")
-        return f"Abrí {canal['nombre']} en vivo."
+    resultado_canal = _youtube_favoritos.abrir_si_conocido(busqueda)
+    if resultado_canal is not None:
+        return resultado_canal
 
     track = _buscar_track(busqueda)
     if track is None:

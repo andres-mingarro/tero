@@ -202,6 +202,23 @@ class Cerebro:
             if not mensaje.tool_calls:
                 if ronda == 0:
                     # Nunca pidió ninguna herramienta: charla directa.
+                    #
+                    # Se evaluó (2026-09-14) y se descartó una red de
+                    # seguridad acá que comparara texto_usuario contra
+                    # los canales de YouTube aprendidos, para el caso en
+                    # que la transcripción se coma el verbo entero del
+                    # pedido ("Poné Vorterix" -> "Bueno, Bortelix", visto
+                    # en vivo). El problema no es de umbral: "hola" se
+                    # parece un 0.75 a "olga" (mismas cuatro letras), un
+                    # puntaje idéntico al de "bortelix" contra "vorterix"
+                    # -- no hay forma de distinguir ambos casos con
+                    # similitud de texto simple. Probado en vivo con la
+                    # red puesta: "pausa la música" abría "Parén la
+                    # Mano", "dale, mirá esto" abría "Radio Mitre". Un
+                    # falso positivo ahí es peor que la charla genérica
+                    # de acá (le cambia lo que está mirando sin que lo
+                    # haya pedido), así que se sacó -- ver BITACORA.html,
+                    # 2026-09-14, para el detalle completo.
                     texto = _sin_pregunta_de_seguimiento((mensaje.content or "").strip())
                     return texto, [{"role": "assistant", "content": texto}]
                 break  # ya no pide más herramientas, pasa a resumir
