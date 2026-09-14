@@ -15,7 +15,7 @@ from typing import Literal
 
 import httpx
 
-from herramientas import _pantalla_youtube, _spotify_auth, herramienta
+from herramientas import _pantalla_youtube, _spotify_auth, _youtube_favoritos, herramienta
 
 _API = "https://api.spotify.com/v1"
 
@@ -174,6 +174,20 @@ def reproducir_musica(busqueda: str) -> str:
 
     busqueda: texto libre, ej. "Metallica black album" o "Bad Bunny".
     """
+    # "Poné X" es ambiguo entre canción y canal de YouTube, y esa
+    # ambigüedad no se puede resolver bien en el prompt: los canales que
+    # el usuario mira son datos dinámicos (crecen con el uso, ver
+    # herramientas/_youtube_favoritos.py), no algo que se pueda listar en
+    # texto fijo. Se resuelve acá, con los datos reales: si X ya es un
+    # canal conocido, gana por sobre buscarlo como canción -- evita que
+    # "Poné Vorterix" termine poniendo cualquier cosa de Spotify que se
+    # le parezca en vez de abrir el canal de verdad (pasó en vivo).
+    canal = _youtube_favoritos.buscar_aprendido(busqueda)
+    if canal is not None:
+        _youtube_favoritos.recordar(canal["handle"], canal["id"], canal["nombre"])
+        _pantalla_youtube.mostrar(f"https://www.youtube.com/@{canal['handle']}/live")
+        return f"Abrí {canal['nombre']} en vivo."
+
     track = _buscar_track(busqueda)
     if track is None:
         return f"La herramienta 'reproducir_musica' falló: no encontré ninguna canción para {busqueda!r} en Spotify."
