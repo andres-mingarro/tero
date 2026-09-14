@@ -1,35 +1,20 @@
-"""Canales de YouTube que el usuario mira seguido: un atajo de voz para
-abrirlos en vivo (o avisar qué tienen nuevo) directo en el monitor
-dedicado a YouTube, sin tener que buscarlos a mano cada vez.
+"""Canales de YouTube: un atajo de voz para abrirlos en vivo (o avisar
+qué tienen nuevo) directo en el monitor dedicado a YouTube.
 
-Los `id` de canal (UCxxxx) se resolvieron a mano desde la etiqueta
-`<link rel="canonical">` de la página de cada @handle -- es más confiable
-que buscar "channelId" a mano en el HTML, que a veces trae el de un canal
-recomendado en vez del propio (pasó con "Parén la Mano" y "Midu" antes de
-usar el canonical). Hacen falta para el feed RSS de
-`sugerir_canales_youtube`; para abrir el canal en vivo alcanza el handle.
+`reproducir_canal_youtube` toma texto libre, no una lista cerrada de
+canales -- ver `herramientas/_youtube_favoritos.py` para el porqué (en
+corto: una lista fija/`Literal[...]` no generaliza, el modelo ni puede
+llamar la herramienta con algo que no esté en el enum) y cómo aprende
+canales nuevos por uso.
 """
 
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Literal
 
 import httpx
 
-from herramientas import _pantalla_youtube, herramienta
+from herramientas import _pantalla_youtube, _youtube_favoritos, herramienta
 from herramientas.musica import pausar_spotify
-
-_CANALES = {
-    "olga": {"handle": "olgaenvivo_", "id": "UC7mJ2EDXFomeDIRFu5FtEbA", "nombre": "Olga"},
-    "mitre": {"handle": "Radiomitre", "id": "UCYvINPByAdCcpA0sWrF3I_w", "nombre": "Radio Mitre"},
-    "urbana_play": {"handle": "UrbanaPlayFM", "id": "UCC1kfsMJko54AqxtcFECt-A", "nombre": "Urbana Play"},
-    "paren_la_mano": {"handle": "Parenlamano", "id": "UCulzKEqyE73gXCUqTimbP4A", "nombre": "Parén la Mano"},
-    "aislados": {"handle": "AisladosElPodcast", "id": "UCXjNLHGKB83V7FxRvEeWJ5A", "nombre": "Aislados"},
-    "vorterix": {"handle": "VorterixOficial", "id": "UCvCTWHCbBC0b9UIeLeNs8ug", "nombre": "Vorterix"},
-    "midu": {"handle": "midudev", "id": "UC8LeXCWOalN8SxlrPcG-PaQ", "nombre": "Midu"},
-}
-
-_CanalId = Literal["olga", "mitre", "urbana_play", "paren_la_mano", "aislados", "midu", "vorterix"]
 
 
 def estado_actual() -> dict | None:
@@ -51,12 +36,21 @@ def estado_actual() -> dict | None:
 
 
 @herramienta
-def reproducir_canal_youtube(canal: _CanalId) -> str:
-    """Abre el canal de YouTube pedido en vivo, en el monitor dedicado a
+def reproducir_canal_youtube(canal: str) -> str:
+    """Abre en vivo el canal de YouTube pedido, en el monitor dedicado a
     YouTube. Usala cuando el usuario nombra un canal puntual ("poné
-    Olga", "quiero ver Midu", "dale, Mitre") -- se abre directo, no hace
-    falta preguntar nada más."""
-    info = _CANALES[canal]
+    Olga", "quiero ver Midu", "dale, Mitre", o cualquier otro canal que
+    nombre, conocido o no) -- se abre directo, no hace falta preguntar
+    nada más. `canal`: el nombre tal como lo dijo el usuario (o tu mejor
+    estimación si la transcripción vino rota, mismo criterio que con
+    nombres de artista antes de buscar en Spotify) -- no hace falta que
+    coincida exacto con nada, la herramienta lo resuelve."""
+    info = _youtube_favoritos.buscar_aprendido(canal)
+    if info is None:
+        info = _youtube_favoritos.resolver_por_busqueda(canal)
+        if info is None:
+            return f"La herramienta 'reproducir_canal_youtube' falló: no encontré ningún canal para {canal!r}."
+    _youtube_favoritos.recordar(info["handle"], info["id"], info["nombre"])
     pausar_spotify()  # que no suenen las dos cosas juntas
     _pantalla_youtube.mostrar(f"https://www.youtube.com/@{info['handle']}/live")
     return f"Abrí {info['nombre']} en vivo."
@@ -125,11 +119,12 @@ def _subio_hace_poco(canal_id: str, horas: int = 20) -> str | None:
 def sugerir_canales_youtube() -> str:
     """Usala solo cuando el usuario contestó que quiere ver "lo nuevo" o
     "videos nuevos" (respuesta a la pregunta de abrir_youtube_general).
-    Devuelve qué canales están en vivo o subieron algo hace poco, para
-    que se lo leas y preguntes cuál quiere -- no abre nada todavía, eso
-    lo hace reproducir_canal_youtube en el turno siguiente."""
+    Devuelve qué canales están en vivo o subieron algo hace poco (de los
+    que Tero ya conoce por uso), para que se lo leas y preguntes cuál
+    quiere -- no abre nada todavía, eso lo hace reproducir_canal_youtube
+    en el turno siguiente."""
     novedades = []
-    for datos in _CANALES.values():
+    for datos in _youtube_favoritos.todos():
         en_vivo, titulo = _esta_en_vivo(datos["handle"])
         if en_vivo:
             novedades.append(f"{datos['nombre']} está en vivo" + (f" ({titulo})" if titulo else ""))

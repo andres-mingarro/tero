@@ -255,10 +255,20 @@ Notas por herramienta:
 - **Celular**: `mandar_al_celular` manda texto/links al celular del
   usuario vía un bot de Telegram personal (`herramientas/_telegram.py`) —
   se eligió sobre GSConnect/Google Chat por simplicidad de setup.
-- **YouTube**: `reproducir_canal_youtube` abre en vivo uno de siete
-  canales mapeados a mano (Olga, Radio Mitre, Urbana Play, Parén la Mano,
-  Aislados, Midu, Vorterix — `herramientas/youtube.py`) cuando el usuario
-  nombra uno puntual. Arranca solo con sonido gracias a
+- **YouTube**: `reproducir_canal_youtube` abre en vivo el canal que el
+  usuario nombre — **texto libre, no una lista fija** (`herramientas/
+  youtube.py`). Empezó como un `Literal[...]` de siete canales
+  hardcodeados y el usuario lo marcó como un antipatrón con razón: una
+  lista cerrada no generaliza, ni el modelo puede llamar la herramienta
+  con algo fuera del enum. Ahora `herramientas/_youtube_favoritos.py`
+  resuelve por aprendizaje: primero busca por parecido fonético
+  (`difflib`) entre los canales ya conocidos (arranca con siete
+  sembrados a mano, crece con el uso) — sin red, así "Bortegui" sigue
+  resolviendo a "Vorterix" aunque la transcripción salga mal, cada vez
+  mejor cuantas más veces se pida; si no hay nada parecido, busca en
+  vivo en YouTube (scraping de resultados filtrados a canales, sin API
+  key) y lo aprende para la próxima. Persistido en
+  `~/.config/tero/youtube_canales.json`. Arranca solo con sonido gracias a
   `--autoplay-policy=no-user-gesture-required` (sin esto, Chrome bloquea
   el autoplay con sonido en un perfil sin historial de interacción, que
   es siempre el caso de este perfil dedicado). Sin canal nombrado, `abrir_youtube_general` abre la home y
