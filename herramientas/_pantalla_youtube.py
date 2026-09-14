@@ -20,18 +20,37 @@ y después moverla con `wmctrl -ir <ventana> -e ...`, ubicando la ventana
 por el PID del proceso recién lanzado (no por título -- el título cambia
 con cada URL/canal, el PID no).
 
-Cada "cambio de canal" mata la ventana anterior y abre una nueva. No hay
-protocolo de control remoto (CDP) para navegar la ventana existente en
-vez de reabrirla, y no hace falta: es un cambio de canal, no una sesión
-de navegación que haya que preservar entre pedidos.
+Cambiar de canal navega la MISMA pestaña por CDP (`--remote-debugging-
+port`, sólo en localhost) en vez de matar la ventana y abrir una nueva
+-- versión anterior de este archivo hacía lo segundo, y el usuario
+preguntó por qué no reusar la pestaña. Tenía razón, y no era solo un
+tema de prolijidad: matar y reabrir le cambiaba la identidad al stream
+de audio en PipeWire en cada cambio de canal, lo que rompió de verdad el
+ducking (`herramientas/_ducking.py`) -- el volumen quedaba pegado en el
+10% duckeado después de cambiar de canal a mitad de una conversación,
+porque el Ducker seguía trackeando el nodo viejo, ya muerto. Reusar la
+pestaña elimina la causa de raíz en vez de parchear el síntoma: el
+stream de audio nunca cambia de identidad entre canales, porque nunca
+se cierra el proceso. Si por lo que sea CDP falla (la ventana no está
+abierta, el usuario la cerró a mano), se cae al camino viejo de abrir
+una ventana nueva.
 """
 
+import asyncio
+import json as _json
 import re
 import subprocess
 import time
 from pathlib import Path
 
+import httpx
+import websockets
+
 PERFIL = Path.home() / ".config" / "tero" / "chrome_youtube"
+
+# Solo localhost (default de Chrome al no pasar --remote-debugging-address),
+# así que no expone nada fuera de esta máquina.
+_PUERTO_CDP = 9333
 
 # Chrome pone esto al final del título de toda ventana; lo que interesa
 # para mostrar en el soul-connector es lo que queda antes.
@@ -45,7 +64,13 @@ MONITOR = {"x": 0, "y": 0, "ancho": 1920, "alto": 1080}
 
 
 def mostrar(url: str) -> None:
-    """Abre `url` en la ventana dedicada, en el monitor de YouTube."""
+    """Muestra `url` en la ventana dedicada, en el monitor de YouTube.
+
+    Si la ventana ya está abierta, la navega en el lugar (CDP) -- mismo
+    proceso, mismo stream de audio, sin parpadeo. Si no hay ventana viva
+    (primera vez, o CDP falló por lo que sea), abre una de cero."""
+    if _navegar_por_cdp(url):
+        return
     _cerrar()
     PERFIL.mkdir(parents=True, exist_ok=True)
     proceso = subprocess.Popen(
@@ -61,12 +86,39 @@ def mostrar(url: str) -> None:
             # dedicado, nunca lo tiene: cada video quedaba pausado
             # esperando un click. El usuario pidió que arranque solo.
             "--autoplay-policy=no-user-gesture-required",
+            f"--remote-debugging-port={_PUERTO_CDP}",
             url,
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     _reposicionar(proceso.pid)
+
+
+def _navegar_por_cdp(url: str) -> bool:
+    """True si logró navegar una pestaña ya abierta a `url` por el
+    protocolo de depuración remota de Chrome (CDP). False ante cualquier
+    problema (ventana no abierta, puerto no responde, sin pestañas) --
+    en ese caso `mostrar()` cae a abrir una ventana nueva."""
+    try:
+        pestanas = httpx.get(f"http://127.0.0.1:{_PUERTO_CDP}/json", timeout=2.0).json()
+    except Exception:
+        return False
+    pestana = next((p for p in pestanas if p.get("type") == "page"), None)
+    url_debug = pestana.get("webSocketDebuggerUrl") if pestana else None
+    if not url_debug:
+        return False
+    try:
+        asyncio.run(_enviar_navigate(url_debug, url))
+        return True
+    except Exception:
+        return False
+
+
+async def _enviar_navigate(url_debug: str, url: str) -> None:
+    async with websockets.connect(url_debug) as ws:
+        await ws.send(_json.dumps({"id": 1, "method": "Page.navigate", "params": {"url": url}}))
+        await ws.recv()
 
 
 def _cerrar() -> None:
@@ -166,5 +218,16 @@ def _reposicionar(pid: int, intentos: int = 20, espera_s: float = 0.2) -> None:
             if len(partes) >= 3 and partes[2] == str(pid):
                 subprocess.run(
                     ["wmctrl", "-ir", partes[0], "-e", objetivo], check=False
+                )
+                # Maximizar de verdad (estado de ventana que maneja
+                # mutter), no solo pedir el tamaño del monitor a mano --
+                # así no depende de que MONITOR tenga la resolución
+                # exacta bien puesta (con decoraciones, escala, etc. el
+                # tamaño "a ojo" quedaba con margen visible alrededor,
+                # reportado en vivo por el usuario).
+                subprocess.run(
+                    ["wmctrl", "-ir", partes[0], "-b",
+                     "add,maximized_vert,maximized_horz"],
+                    check=False,
                 )
                 return

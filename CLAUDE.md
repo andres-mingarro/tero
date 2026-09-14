@@ -239,7 +239,13 @@ Notas por herramienta:
   pegar un salto para arriba y otro para abajo antes de contestar). Se
   identifica cada stream activo (`state=="running"`) vía `pw-dump`,
   salvo el del propio proceso de Tero (TTS/beeps, por PID) para no
-  duckearse a sí mismo. Dos vías descartadas en el camino para mover el
+  duckearse a sí mismo. `Ducker` guarda a qué nodos corresponde su
+  estimación de volumen y fuerza releerlo si el conjunto de nodos activos
+  cambió desde la última vez (ej. una app se cerró y otra arrancó a mitad
+  de un duckeo) — sin esto, arrastraba el volumen duckeado viejo sobre un
+  nodo nuevo que en realidad arrancaba en su volumen real, dejándolo
+  pegado bajo (bug real, encontrado con un cambio de canal de YouTube a
+  mitad de conversación). Dos vías descartadas en el camino para mover el
   volumen: `playerctl volume` no sirve porque el cliente de Spotify para
   Linux no implementa `SetVolume` vía MPRIS (éxito reportado, cero
   efecto real); la Web API de Spotify (`/me/player/volume`) sí cambia el
@@ -280,7 +286,12 @@ Notas por herramienta:
   usuario (`herramientas/_pantalla_youtube.py`) — necesita forzar
   `--ozone-platform=x11` porque el Chrome nativo de Wayland no deja
   posicionar la ventana por código (ver detalle en `BITACORA.html`,
-  2026-09-14).
+  2026-09-14). Un cambio de canal **navega la misma pestaña por CDP**
+  (`--remote-debugging-port`, solo localhost) en vez de matar la ventana
+  y abrir una nueva — así el stream de audio nunca cambia de identidad
+  en PipeWire, que es justo lo que rompía el ducking al cambiar de canal
+  a mitad de una conversación (ver más abajo). Si CDP falla, cae a abrir
+  una ventana nueva.
 - **Web / MercadoLibre**: **no** hacer un agente con navegador. El modelo
   arma la URL y se abre. Es instantáneo y no se rompe:
   `listado.mercadolibre.com.ar/zapatillas-adidas-talle-44`

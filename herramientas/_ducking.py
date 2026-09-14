@@ -128,6 +128,16 @@ class Ducker:
         self._actual: float | None = None  # nuestra propia estimación en curso
         self._objetivo: float | None = None
         self._hilo: threading.Thread | None = None
+        # A qué nodos corresponde self._actual/self._volumen_real -- si
+        # los nodos activos cambian entre un ciclo y el siguiente (ej. un
+        # cambio de canal de YouTube mata la ventana vieja y abre una
+        # nueva a mitad de un duckeo), la estimación vieja ya no
+        # significa nada para el nodo nuevo. Bug real, visto en vivo: al
+        # cambiar de canal a mitad de una conversación, la ventana nueva
+        # arrancaba en su volumen real (1.0) pero el Ducker la pisaba
+        # hacia abajo porque creía que "el volumen actual" seguía siendo
+        # el 10% duckeado del nodo viejo, ya muerto.
+        self._nodos_actuales: frozenset[int] | None = None
 
     def activar(self) -> None:
         """Llamar al entrar a un estado no-idle (escuchando/pensando/hablando)."""
@@ -160,11 +170,15 @@ class Ducker:
                 self._objetivo = None
             return
 
+        nodos_set = frozenset(nodos)
         with self._lock:
             actual = self._actual
-        if actual is None:
-            # Bootstrap: primera vez que se duckea en este proceso -- única
-            # lectura real de todo el ciclo de vida del Ducker.
+            nodos_cambiaron = nodos_set != self._nodos_actuales
+        if actual is None or nodos_cambiaron:
+            # Bootstrap: primera vez que se duckea en este proceso, o los
+            # nodos activos cambiaron desde la última vez (ver comentario
+            # de _nodos_actuales en __init__) -- en los dos casos, la
+            # única lectura real del volumen en todo este ciclo.
             real = _volumen_nodo(nodos[0])
             if real is None:
                 with self._lock:
@@ -174,6 +188,7 @@ class Ducker:
             with self._lock:
                 self._volumen_real = real
                 self._actual = real
+                self._nodos_actuales = nodos_set
 
         while True:
             with self._lock:
@@ -198,6 +213,7 @@ class Ducker:
                         # de otra cosa en vez del suyo.
                         self._actual = None
                         self._volumen_real = None
+                        self._nodos_actuales = None
                 return
             factor = _FACTOR_BAJADA if objetivo < actual else _FACTOR_SUBIDA
             actual += (objetivo - actual) * factor
