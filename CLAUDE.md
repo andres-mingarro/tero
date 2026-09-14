@@ -239,12 +239,13 @@ Notas por herramienta:
   pegar un salto para arriba y otro para abajo antes de contestar). Se
   identifica cada stream activo (`state=="running"`) vía `pw-dump`,
   salvo el del propio proceso de Tero (TTS/beeps, por PID) para no
-  duckearse a sí mismo. `Ducker` guarda a qué nodos corresponde su
-  estimación de volumen y fuerza releerlo si el conjunto de nodos activos
-  cambió desde la última vez (ej. una app se cerró y otra arrancó a mitad
-  de un duckeo) — sin esto, arrastraba el volumen duckeado viejo sobre un
-  nodo nuevo que en realidad arrancaba en su volumen real, dejándolo
-  pegado bajo (bug real, encontrado con un cambio de canal de YouTube a
+  duckearse a sí mismo. `Ducker` guarda a qué **PIDs** corresponde su
+  estimación de volumen (no a qué ids de nodo de PipeWire, que pueden
+  cambiar aunque sea la misma ventana — confirmado en vivo navegando por
+  CDP) y fuerza releerlo si los PIDs activos cambiaron desde la última
+  vez — sin esto, arrastraba el volumen duckeado viejo sobre un stream
+  nuevo que en realidad arrancaba en su volumen real, dejándolo pegado
+  bajo (bug real, visto dos veces con cambios de canal de YouTube a
   mitad de conversación). Dos vías descartadas en el camino para mover el
   volumen: `playerctl volume` no sirve porque el cliente de Spotify para
   Linux no implementa `SetVolume` vía MPRIS (éxito reportado, cero

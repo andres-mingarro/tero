@@ -631,6 +631,12 @@
       <p>El usuario pidió que la ventana de YouTube abra maximizada — mandó una captura donde se veía con bordes y sin ocupar todo el monitor. La causa: <code>MONITOR</code> en <code>_pantalla_youtube.py</code> tenía el tamaño hardcodeado en <code>1920x1080</code>, pero <code>xwininfo</code> mostró que el tamaño real que mutter le da a una ventana maximizada en ese monitor es <code>3840x2058</code> — casi el doble. El valor a mano estaba mal desde el principio (posiblemente una confusión de escala/HiDPI al leerlo de <code>xrandr</code> en su momento).</p>
       <p>Fix: en vez de corregir el número a mano (mismo riesgo de volver a equivocarse), <code>_reposicionar()</code> ahora le pide a <code>wmctrl</code> que <strong>maximice de verdad</strong> (<code>wmctrl -ir &lt;ventana&gt; -b add,maximized_vert,maximized_horz</code>) después de ubicarla en el monitor correcto — usa el tamaño real que conoce mutter, no un número fijo en el código. Confirmado en vivo por el usuario ("ahora si!! hermoso").</p>
     </div>
+
+    <div class="entrada">
+      <div class="tags"><span class="tag">bug</span></div>
+      <p>El mismo bug de "sonido pegado en el 10%" de la entrada de arriba volvió a aparecer, esta vez cambiando a Urbana Play, a pesar del fix de CDP. Causa distinta pero relacionada: el <code>Ducker</code> identificaba "cambió el origen del audio" comparando el <strong>id de nodo de PipeWire</strong> entre un ciclo y el siguiente — y ese id puede cambiar aunque sea <em>la misma ventana</em> (confirmado en vivo: navegar por CDP a veces le crea a Chrome un stream de audio nuevo, con id distinto, para el mismo proceso). El Ducker interpretaba eso como "cambió de nodo", pero el nodo nuevo podía aparecer ya en un estado intermedio o el bootstrap podía leer en el momento equivocado, dejando <code>self._volumen_real</code> con un valor que no era el real.</p>
+      <p>Fix: <code>_nodos_a_duckear()</code> ahora devuelve <code>(id, pid)</code>, y <code>Ducker</code> compara por <strong>PID del proceso</strong>, no por id de nodo — el PID es estable mientras la app no se cierre de verdad, sea cual sea el id que PipeWire le asigne al stream en cada momento. Probado en vivo reproduciendo el escenario exacto: duckear un canal, cambiar de canal a mitad de la rampa (con el fix de CDP de la entrada anterior ya puesto) y desactivar — los dos streams de la ventana nueva vuelven a 1.0 de verdad, no quedan pegados.</p>
+    </div>
   </section>
 </main>
 </body>

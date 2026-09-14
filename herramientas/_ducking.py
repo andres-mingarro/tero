@@ -67,11 +67,20 @@ _FACTOR_SUBIDA = 0.05
 _UMBRAL_LISTO = 0.004
 
 
-def _nodos_a_duckear() -> list[int]:
-    """Todo stream de salida de audio realmente sonando (`state=="running"`)
-    ahora mismo, de cualquier aplicación, salvo el del propio proceso de
-    Tero (el TTS y los beeps también son streams de PipeWire, y duckearse
-    a sí mismo cortaría la propia voz)."""
+def _nodos_a_duckear() -> list[tuple[int, int]]:
+    """(id de nodo, pid del proceso dueño) de todo stream de salida de
+    audio realmente sonando (`state=="running"`) ahora mismo, de
+    cualquier aplicación, salvo el del propio proceso de Tero (el TTS y
+    los beeps también son streams de PipeWire, y duckearse a sí mismo
+    cortaría la propia voz).
+
+    El PID viaja junto al id a propósito: es la identidad estable de
+    "qué app es esta" -- el id de PipeWire es efímero y puede cambiar
+    aunque sea la misma ventana (confirmado en vivo: navegar la ventana
+    de YouTube por CDP a veces le crea un stream nuevo con id distinto
+    para el mismo proceso). `Ducker` compara por PID, no por id, para no
+    confundir "cambió de verdad la app que suena" con "PipeWire le
+    asignó un número distinto a la misma app"."""
     try:
         resultado = subprocess.run(
             ["pw-dump"], capture_output=True, text=True, check=False, timeout=2.0
@@ -80,17 +89,20 @@ def _nodos_a_duckear() -> list[int]:
     except Exception:
         return []
     propio_pid = os.getpid()
-    ids = []
+    pares = []
     for nodo in nodos:
         info = nodo.get("info") or {}
         props = info.get("props") or {}
         if props.get("media.class") != "Stream/Output/Audio" or info.get("state") != "running":
             continue
         pid = props.get("application.process.id")
-        if pid is not None and int(pid) == propio_pid:
+        if pid is None:
             continue
-        ids.append(nodo["id"])
-    return ids
+        pid = int(pid)
+        if pid == propio_pid:
+            continue
+        pares.append((nodo["id"], pid))
+    return pares
 
 
 def _volumen_nodo(id_: int) -> float | None:
@@ -128,16 +140,19 @@ class Ducker:
         self._actual: float | None = None  # nuestra propia estimación en curso
         self._objetivo: float | None = None
         self._hilo: threading.Thread | None = None
-        # A qué nodos corresponde self._actual/self._volumen_real -- si
-        # los nodos activos cambian entre un ciclo y el siguiente (ej. un
-        # cambio de canal de YouTube mata la ventana vieja y abre una
-        # nueva a mitad de un duckeo), la estimación vieja ya no
-        # significa nada para el nodo nuevo. Bug real, visto en vivo: al
-        # cambiar de canal a mitad de una conversación, la ventana nueva
-        # arrancaba en su volumen real (1.0) pero el Ducker la pisaba
-        # hacia abajo porque creía que "el volumen actual" seguía siendo
-        # el 10% duckeado del nodo viejo, ya muerto.
-        self._nodos_actuales: frozenset[int] | None = None
+        # A qué PIDs corresponde self._actual/self._volumen_real -- si
+        # las apps que suenan cambian entre un ciclo y el siguiente (ej.
+        # se cierra una y arranca otra a mitad de un duckeo), la
+        # estimación vieja ya no significa nada para la app nueva. Por
+        # PID, no por id de nodo de PipeWire: el id puede cambiar aunque
+        # sea la misma app (visto en vivo con la ventana de YouTube
+        # navegando por CDP), el PID no. Bug real, visto en vivo dos
+        # veces: cambiar de canal a mitad de una conversación dejaba el
+        # volumen pegado en el 10% duckeado -- la ventana nueva (o el
+        # stream nuevo de la misma ventana) arrancaba en su volumen real
+        # (1.0), pero el Ducker lo pisaba hacia abajo creyendo que "el
+        # volumen actual" seguía siendo el de antes.
+        self._pids_actuales: frozenset[int] | None = None
 
     def activar(self) -> None:
         """Llamar al entrar a un estado no-idle (escuchando/pensando/hablando)."""
@@ -170,16 +185,16 @@ class Ducker:
                 self._objetivo = None
             return
 
-        nodos_set = frozenset(nodos)
+        pids_set = frozenset(pid for _id, pid in nodos)
         with self._lock:
             actual = self._actual
-            nodos_cambiaron = nodos_set != self._nodos_actuales
-        if actual is None or nodos_cambiaron:
+            pids_cambiaron = pids_set != self._pids_actuales
+        if actual is None or pids_cambiaron:
             # Bootstrap: primera vez que se duckea en este proceso, o los
-            # nodos activos cambiaron desde la última vez (ver comentario
-            # de _nodos_actuales en __init__) -- en los dos casos, la
+            # PIDs activos cambiaron desde la última vez (ver comentario
+            # de _pids_actuales en __init__) -- en los dos casos, la
             # única lectura real del volumen en todo este ciclo.
-            real = _volumen_nodo(nodos[0])
+            real = _volumen_nodo(nodos[0][0])
             if real is None:
                 with self._lock:
                     self._objetivo = None
@@ -188,7 +203,7 @@ class Ducker:
             with self._lock:
                 self._volumen_real = real
                 self._actual = real
-                self._nodos_actuales = nodos_set
+                self._pids_actuales = pids_set
 
         while True:
             with self._lock:
@@ -197,7 +212,7 @@ class Ducker:
                 return
             if abs(objetivo - actual) < _UMBRAL_LISTO:
                 actual = objetivo
-                for id_ in nodos:
+                for id_, _pid in nodos:
                     _set_volumen_nodo(id_, actual)
                 with self._lock:
                     self._actual = actual
@@ -213,11 +228,11 @@ class Ducker:
                         # de otra cosa en vez del suyo.
                         self._actual = None
                         self._volumen_real = None
-                        self._nodos_actuales = None
+                        self._pids_actuales = None
                 return
             factor = _FACTOR_BAJADA if objetivo < actual else _FACTOR_SUBIDA
             actual += (objetivo - actual) * factor
-            for id_ in nodos:
+            for id_, _pid in nodos:
                 _set_volumen_nodo(id_, actual)
             with self._lock:
                 self._actual = actual
