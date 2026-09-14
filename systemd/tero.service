@@ -34,6 +34,16 @@ ExecStart=%h/proyectos/tero/tero
 # mismo problema en vez de dejar que el usuario lo vea y decida. Mismo
 # criterio que ya está documentado para salud.py: avisar, no auto-curar.
 Restart=no
+# KillMode=process (no el "control-group" por defecto de systemd): el
+# default manda la señal de apagado a TODO el cgroup del servicio, y
+# Chrome (la ventana dedicada de YouTube, herramientas/_pantalla_
+# youtube.py) queda ahí adentro por ser un hijo del daemon -- un reinicio
+# del servicio se la llevaba puesta (confirmado en vivo: el usuario
+# estaba viendo un canal y se le cerró solo al reiniciar Tero por un
+# cambio de prompt). `./tero` ya sabe cerrar sus propios hijos reales
+# (daemon, soul-connector clásico) con su propio trap de INT/TERM -- no
+# hace falta que systemd mate de más por encima.
+KillMode=process
 
 [Install]
 WantedBy=graphical-session.target
