@@ -17,6 +17,7 @@ from typing import Literal
 import httpx
 
 from herramientas import _pantalla_youtube, herramienta
+from herramientas.musica import pausar_spotify
 
 _CANALES = {
     "olga": {"handle": "olgaenvivo_", "id": "UC7mJ2EDXFomeDIRFu5FtEbA", "nombre": "Olga"},
@@ -29,6 +30,7 @@ _CANALES = {
 }
 
 _CanalId = Literal["olga", "mitre", "urbana_play", "paren_la_mano", "aislados", "midu", "vorterix"]
+
 
 def estado_actual() -> dict | None:
     """Para el soul-connector, igual que hace con la canción de Spotify
@@ -55,6 +57,7 @@ def reproducir_canal_youtube(canal: _CanalId) -> str:
     Olga", "quiero ver Midu", "dale, Mitre") -- se abre directo, no hace
     falta preguntar nada más."""
     info = _CANALES[canal]
+    pausar_spotify()  # que no suenen las dos cosas juntas
     _pantalla_youtube.mostrar(f"https://www.youtube.com/@{info['handle']}/live")
     return f"Abrí {info['nombre']} en vivo."
 

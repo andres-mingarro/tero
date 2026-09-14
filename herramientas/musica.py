@@ -15,7 +15,7 @@ from typing import Literal
 
 import httpx
 
-from herramientas import _spotify_auth, herramienta
+from herramientas import _pantalla_youtube, _spotify_auth, herramienta
 
 _API = "https://api.spotify.com/v1"
 
@@ -188,6 +188,7 @@ def reproducir_musica(busqueda: str) -> str:
     cola = [track["uri"]] + [
         t["uri"] for t in _favoritos_aleatorios(10) if t["uri"] != track["uri"]
     ]
+    _pantalla_youtube.pausar()  # que no suenen las dos cosas juntas
     _reproducir_uris(cola, device_id)
     artista = track["artists"][0]["name"] if track["artists"] else "?"
     return f"Reproduciendo {track['name']!r} de {artista}."
@@ -211,6 +212,7 @@ def reproducir_musica_aleatoria() -> str:
     if player and player.get("is_playing"):
         return "Ya estaba sonando música, no cambié nada."
     if item:
+        _pantalla_youtube.pausar()
         _reanudar(device_id)
         artista = item["artists"][0]["name"] if item.get("artists") else "?"
         return f"Reanudando {item['name']!r} de {artista}."
@@ -219,6 +221,7 @@ def reproducir_musica_aleatoria() -> str:
     if not tracks:
         return "La herramienta 'reproducir_musica_aleatoria' falló: no tenés canciones en 'Tus me gusta' en Spotify."
 
+    _pantalla_youtube.pausar()
     _reproducir_uris([t["uri"] for t in tracks], device_id)
     primero = tracks[0]
     artista = primero["artists"][0]["name"] if primero["artists"] else "?"
@@ -231,6 +234,19 @@ _COMANDOS_PLAYERCTL = {
     "siguiente": "next",
     "anterior": "previous",
 }
+
+
+def pausar_spotify() -> None:
+    """Pausa Spotify puntualmente (nombre de reproductor MPRIS fijo,
+    "spotify") -- para cuando arranca un canal de YouTube (ver
+    herramientas/youtube.py) y no tiene que sonar música al mismo tiempo.
+    A diferencia de control_media/_playerctl, que a propósito no apunta a
+    ningún reproductor en particular (agarra "el primero disponible", sea
+    cual sea), acá interesa Spotify puntualmente -- con la ventana de
+    YouTube también registrada como reproductor MPRIS, dejar esto sin
+    apuntar podría terminar pausando la propia YouTube en vez de Spotify.
+    Silencioso si Spotify no está corriendo."""
+    subprocess.run(["playerctl", "-p", "spotify", "pause"], capture_output=True, check=False)
 
 
 def _playerctl(accion: str) -> subprocess.CompletedProcess:

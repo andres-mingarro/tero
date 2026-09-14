@@ -91,6 +91,38 @@ def _limpiar_titulo(titulo: str) -> str:
     return re.sub(r"^\(\d+\)\s*", "", titulo).strip()
 
 
+def _reproductor_mpris() -> str | None:
+    """Nombre del reproductor MPRIS (`playerctl -l`) de la ventana
+    dedicada, si está abierta y con algo de media activo. Chrome expone
+    cada ventana con audio/video como un reproductor MPRIS aparte
+    (`chromium.instance<PID>`) -- y el PID en el nombre es justo el del
+    proceso que lanzó `mostrar()`, así que alcanza con el mismo filtro
+    por `--user-data-dir` que usa `titulo_actual()`, sin tener que
+    recordar el PID entre llamadas."""
+    try:
+        salida = subprocess.run(
+            ["playerctl", "-l"], capture_output=True, text=True, timeout=2.0, check=False
+        ).stdout
+    except Exception:
+        return None
+    for nombre in salida.splitlines():
+        nombre = nombre.strip()
+        match = re.match(r"^chromium\.instance(\d+)$", nombre)
+        if match and _es_nuestro_proceso(match.group(1)):
+            return nombre
+    return None
+
+
+def pausar() -> None:
+    """Pausa lo que esté sonando en la ventana de YouTube, si hay algo.
+    No hace nada (silencioso) si la ventana no está abierta o no tiene
+    media activo -- se llama desde herramientas/musica.py cada vez que
+    arranca algo de música, para que no suenen las dos cosas juntas."""
+    nombre = _reproductor_mpris()
+    if nombre:
+        subprocess.run(["playerctl", "-p", nombre, "pause"], check=False)
+
+
 def titulo_actual() -> str | None:
     """Título de lo que esté mostrando la ventana dedicada ahora mismo --
     lo haya abierto Tero (reproducir_canal_youtube) o el usuario a mano

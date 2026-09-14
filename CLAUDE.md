@@ -221,6 +221,13 @@ Notas por herramienta:
   anterior sobre lo que ya esté sonando (Spotify, navegador, etc.) —
   requiere tenerlo instalado, no viene por defecto. Requiere Spotify
   Premium (la Web API no deja reproducir en cuentas free).
+  **Música y YouTube se pausan mutuamente**: arrancar algo en
+  `reproducir_musica`/`reproducir_musica_aleatoria` pausa la ventana de
+  YouTube (Chrome expone cada ventana con media como reproductor MPRIS
+  aparte, `chromium.instance<PID>` — ver `_pantalla_youtube.pausar()`),
+  y `reproducir_canal_youtube` pausa Spotify puntualmente
+  (`musica.pausar_spotify()`, apuntado a `-p spotify` a propósito, para
+  no confundirse con el reproductor de la propia ventana de YouTube).
   **Ducking** (`herramientas/_ducking.py`, no es una herramienta del
   modelo): mientras Tero escucha/piensa/habla, **todo lo que esté
   sonando en el sistema** baja al 10% — progresivo, no de golpe, regla
