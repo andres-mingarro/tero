@@ -200,17 +200,7 @@ class Tero:
             return None
 
     def _estado_soul_connector(self, nombre: str) -> None:
-        anterior = self._estado_voz
         self._estado_voz = nombre
-        # Duckear música mientras se escucha/piensa/habla (no solo mientras
-        # se graba): si se restaurara el volumen entre "pensando" y
-        # "hablando" se oiría un salto para arriba y otro para abajo justo
-        # antes de que Tero conteste. Solo se toca en las transiciones
-        # hacia/desde idle -- entre estados no-idle no hay nada que hacer.
-        if nombre != "idle" and anterior == "idle":
-            self._ducker.activar()
-        elif nombre == "idle" and anterior != "idle":
-            self._ducker.desactivar()
         if self._soul_connector is not None:
             self._soul_connector.estado(nombre)
 
@@ -255,6 +245,11 @@ class Tero:
         self._grabando = True
         self._modo_toggle = False
         _beep(880)
+        # Duckear el volumen general justo acá: dura exactamente lo que
+        # dura la grabación (hasta on_up), no todo el turno -- "pensando"
+        # y "hablando" no tienen mic abierto que proteger, y así nunca se
+        # solapa con la propia voz de Tero (ver herramientas/_ducking.py).
+        self._ducker.activar()
         self._estado_soul_connector("escuchando")
         self._grabador.iniciar()
 
@@ -271,6 +266,7 @@ class Tero:
         self._grabando = False
         self._modo_toggle = False
         _beep(440)
+        self._ducker.desactivar()
         audio = self._grabador.detener()
         # En un hilo aparte: así el hilo que lee la tecla (plataforma/linux.py)
         # queda libre para notar un nuevo apretón mientras STT/cerebro/TTS

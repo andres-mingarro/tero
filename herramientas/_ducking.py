@@ -1,113 +1,71 @@
-"""Ducking: baja el volumen de **cualquier cosa que esté sonando** en el
-sistema mientras Tero escucha, piensa o habla, y lo devuelve al volumen
-real al volver a idle. Regla global a propósito, no una lista de
-aplicaciones conocidas (Spotify, la ventana de YouTube) -- un pedido
-explícito del usuario tras ver que YouTube tapaba su voz igual que
-Spotify, con el mismo problema de fondo: cualquier audio a volumen normal
-le gana al micrófono y arruina el STT, sea cual sea la app. Se duckea
-todo salvo la salida del propio Tero (TTS/beeps), identificada por PID.
+"""Ducking: baja el volumen general de salida mientras el micrófono está
+grabando (push-to-talk apretado), y lo devuelve al soltar la tecla.
 
-Dos enfoques descartados, probados en vivo:
+Rediseñado el 2026-09-14 después de un día entero de bugs reales con el
+diseño anterior (duckear cada stream de aplicación por separado, uno por
+uno, identificándolos por PID en PipeWire): Spotify empaquetado como
+Snap no trae su PID en el nodo que de verdad reproduce audio -- hay que
+buscarlo en un nodo "cliente" hermano vía `client.id`, y sin eso Spotify
+dejaba de duckearse por completo. Chrome le cambia el id (y a veces el
+stream entero desaparece de `pw-dump` casi un segundo mientras carga la
+página nueva) al navegar de canal por CDP, y eso dejaba el volumen
+pegado en el nivel duckeado para siempre más de una vez. Cada arreglo
+tapaba un caso concreto sin arreglar la clase de problema: identificar
+"qué stream de PipeWire es esta aplicación, ahora mismo" es
+estructuralmente fragil, cambia todo el tiempo por razones que no
+tienen nada que ver con Tero.
 
-- `playerctl volume` (MPRIS, mismo mecanismo que control_media): el
-  cliente de Spotify para Linux no implementa SetVolume vía MPRIS -- el
-  comando devuelve éxito pero no cambia nada.
-- La Web API de Spotify (`/me/player/volume`, mismo mecanismo de auth que
-  herramientas/musica.py): funciona, pero /me/player/devices tarda 1-3s
-  en reflejar un cambio propio (eventual consistency del lado de
-  Spotify), y cada paso es un request HTTP -- demasiado lento para una
-  rampa que tiene que notarse ya al soltar la tecla.
-
-Lo que sí funciona: el cliente de Spotify aplica su volumen ajustando el
-volumen del propio stream de salida en PipeWire (`wpctl status` lo lista
-bajo "Streams", con su propio node id, no el sink del sistema). Ajustarlo
-ahí es una llamada local instantánea (~10ms), sin lag de sincronización,
-y no toca el volumen del sistema (`herramientas/volumen.py`, wpctl sobre
-@DEFAULT_AUDIO_SINK@): ese sink también lo usa el TTS para salir, así que
-bajarlo de golpe se llevaría puesta la voz de Tero.
+La salida: el usuario hizo la pregunta correcta -- ¿para qué duckear por
+aplicación si nunca hace falta que el volumen general y la voz de Tero
+convivan al mismo tiempo? El único motivo real para duckear es proteger
+la grabación del micrófono mientras está abierta. Ni "pensando"
+(STT + cerebro, el micrófono ya se cerró) ni "hablando" (TTS, la propia
+voz de Tero) necesitan nada duckeado -- no hay grabación en curso que
+proteger, y si el usuario quiere interrumpir a Tero mientras habla,
+aprieta la tecla de nuevo (barge-in, ver main.py) sin que el volumen
+tenga nada que ver con eso. Acotando el duckeo a exactamente la ventana
+en que la tecla está apretada (`on_down` -> `on_up`, ya no atado a
+"escuchando"/"pensando"/"hablando"/"idle") alcanza con el volumen
+**general del sistema** (`@DEFAULT_AUDIO_SINK@`) -- que siempre existe,
+no aparece ni desaparece a mitad de una navegación como un stream de
+Chrome -- y desaparece toda la complejidad de rastrear aplicaciones
+individuales. La única razón por la que este módulo nunca había tocado
+el sink general es que la propia voz de Tero (TTS, los beeps) sale por
+ese mismo sink -- pero como el duckeo ahora dura exactamente lo que dura
+la grabación, nunca se solapa con nada que Tero necesite que se escuche
+fuerte: el usuario todavía tiene la tecla apretada, Tero no dijo ni una
+palabra.
 
 Un solo hilo en segundo plano interpola el volumen hacia un objetivo que
-puede cambiar mientras corre (redirigir una bajada a mitad de camino si
-se suelta la tecla rápido), sin bloquear nunca al hilo que llama.
-
-Importante: `wpctl get-volume` redondea a 2 decimales en su salida de
-texto. Confirmado en vivo que leer el volumen de vuelta en cada paso de
-la rampa para calcular el siguiente (en vez de llevar la cuenta uno
-mismo) hace que se trabe apenas la diferencia baja de ~0.01 -- el paso
-calculado es más chico que la resolución de lectura, wpctl devuelve
-siempre el mismo valor redondeado, y la rampa nunca converge. Por eso acá
-se lee una sola vez **por ciclo completo** (bootstrap al primer `activar()`
-después de haber vuelto a idle, nunca en medio de una rampa) y de ahí en
-más el propio Ducker es la única fuente de verdad de "dónde está el
-volumen ahora": son sus propios `_set_volumen_nodo` los que lo mueven, sin
-volver a preguntarle a wpctl. El bootstrap se repite en cada ciclo (no
-solo la primera vez del proceso) para no arrastrar el volumen real de una
-app vieja a una app distinta que empezó a sonar después.
+puede cambiar mientras corre, sin bloquear nunca al hilo que llama.
+`wpctl get-volume` redondea a 2 decimales en su salida de texto:
+releerlo en cada paso de la rampa para calcular el siguiente (en vez de
+llevar la cuenta uno mismo) lo traba apenas la diferencia baja de ~0.01
+-- por eso acá se lee el volumen real una sola vez por ciclo completo
+(bootstrap) y de ahí en más el propio Ducker es la única fuente de
+verdad de "dónde está el volumen ahora".
 """
 
-import json
-import os
 import subprocess
 import threading
 import time
 
+_SINK = "@DEFAULT_AUDIO_SINK@"
+
 _VOLUMEN_DUCKED = 0.10
 _PASO_S = 0.02
-# Bajar más rápido que subir (tapar la música antes de que el mic termine
-# de abrirse) y subir bien despacio (que no se note el regreso) -- mismo
-# criterio de suavizado asimétrico que ya se usa en el soul-connector
-# para el RMS. Factores bajados el 2026-09-14 (0.35/0.12 originales
-# sonaban a corte seco, "muy pronunciado" según el usuario) -- 0.22 sigue
-# terminando la bajada en well under medio segundo, así que no vuelve a
-# abrir la ventana de audio sucio en el mic que motivó el ducking global
-# (ver encabezado del módulo); 0.05 hace un regreso bien gradual, de un
-# par de segundos, que ya no tiene esa restricción de tiempo.
+# Bajar más rápido que subir (tapar lo que esté sonando antes de que el
+# mic termine de abrirse) y subir bien despacio (que no se note el
+# regreso) -- mismo criterio de suavizado asimétrico que ya se usa en el
+# soul-connector para el RMS.
 _FACTOR_BAJADA = 0.22
 _FACTOR_SUBIDA = 0.05
 _UMBRAL_LISTO = 0.004
 
 
-def _nodos_a_duckear() -> list[tuple[int, int]]:
-    """(id de nodo, pid del proceso dueño) de todo stream de salida de
-    audio realmente sonando (`state=="running"`) ahora mismo, de
-    cualquier aplicación, salvo el del propio proceso de Tero (el TTS y
-    los beeps también son streams de PipeWire, y duckearse a sí mismo
-    cortaría la propia voz).
-
-    El PID viaja junto al id a propósito: es la identidad estable de
-    "qué app es esta" -- el id de PipeWire es efímero y puede cambiar
-    aunque sea la misma ventana (confirmado en vivo: navegar la ventana
-    de YouTube por CDP a veces le crea un stream nuevo con id distinto
-    para el mismo proceso). `Ducker` compara por PID, no por id, para no
-    confundir "cambió de verdad la app que suena" con "PipeWire le
-    asignó un número distinto a la misma app"."""
-    try:
-        resultado = subprocess.run(
-            ["pw-dump"], capture_output=True, text=True, check=False, timeout=2.0
-        )
-        nodos = json.loads(resultado.stdout)
-    except Exception:
-        return []
-    propio_pid = os.getpid()
-    pares = []
-    for nodo in nodos:
-        info = nodo.get("info") or {}
-        props = info.get("props") or {}
-        if props.get("media.class") != "Stream/Output/Audio" or info.get("state") != "running":
-            continue
-        pid = props.get("application.process.id")
-        if pid is None:
-            continue
-        pid = int(pid)
-        if pid == propio_pid:
-            continue
-        pares.append((nodo["id"], pid))
-    return pares
-
-
-def _volumen_nodo(id_: int) -> float | None:
+def _volumen_sink() -> float | None:
     resultado = subprocess.run(
-        ["wpctl", "get-volume", str(id_)], capture_output=True, text=True, check=False
+        ["wpctl", "get-volume", _SINK], capture_output=True, text=True, check=False
     )
     if resultado.returncode != 0:
         return None
@@ -119,9 +77,9 @@ def _volumen_nodo(id_: int) -> float | None:
     return None
 
 
-def _set_volumen_nodo(id_: int, valor: float) -> None:
+def _set_volumen_sink(valor: float) -> None:
     subprocess.run(
-        ["wpctl", "set-volume", str(id_), f"{max(0.0, min(1.0, valor)):.3f}"],
+        ["wpctl", "set-volume", _SINK, f"{max(0.0, min(1.0, valor)):.3f}"],
         capture_output=True,
         check=False,
     )
@@ -130,41 +88,28 @@ def _set_volumen_nodo(id_: int, valor: float) -> None:
 class Ducker:
     def __init__(self):
         self._lock = threading.Lock()
-        # Se capturan una sola vez por proceso y no se vuelven a leer (ver
-        # nota del módulo) -- si el usuario cambia el volumen de Spotify a
-        # mano mientras Tero está en idle entre conversaciones, el próximo
-        # ciclo de ducking lo va a pisar con este valor viejo. No vale la
-        # pena resolverlo: es un asistente de uso personal, y basta con
-        # reiniciar Tero para que recapture el volumen real actual.
-        self._volumen_real: float | None = None  # a qué volumen volver al desactivar
+        # Se capturan una sola vez por ciclo (ver nota del módulo) -- si
+        # el usuario cambia el volumen a mano mientras Tero está en
+        # medio de algo, el próximo ciclo lo va a pisar con este valor
+        # viejo. No vale la pena resolverlo: es un asistente de uso
+        # personal, y basta con soltar la tecla para que el próximo
+        # apretón recapture el volumen real actual.
+        self._volumen_real: float | None = None  # a qué volumen volver al soltar la tecla
         self._actual: float | None = None  # nuestra propia estimación en curso
         self._objetivo: float | None = None
         self._hilo: threading.Thread | None = None
-        # A qué PIDs corresponde self._actual/self._volumen_real -- si
-        # las apps que suenan cambian entre un ciclo y el siguiente (ej.
-        # se cierra una y arranca otra a mitad de un duckeo), la
-        # estimación vieja ya no significa nada para la app nueva. Por
-        # PID, no por id de nodo de PipeWire: el id puede cambiar aunque
-        # sea la misma app (visto en vivo con la ventana de YouTube
-        # navegando por CDP), el PID no. Bug real, visto en vivo dos
-        # veces: cambiar de canal a mitad de una conversación dejaba el
-        # volumen pegado en el 10% duckeado -- la ventana nueva (o el
-        # stream nuevo de la misma ventana) arrancaba en su volumen real
-        # (1.0), pero el Ducker lo pisaba hacia abajo creyendo que "el
-        # volumen actual" seguía siendo el de antes.
-        self._pids_actuales: frozenset[int] | None = None
 
     def activar(self) -> None:
-        """Llamar al entrar a un estado no-idle (escuchando/pensando/hablando)."""
+        """Llamar justo al abrir el micrófono (on_down)."""
         with self._lock:
             self._objetivo = _VOLUMEN_DUCKED
             self._asegurar_hilo()
 
     def desactivar(self) -> None:
-        """Llamar al volver a idle."""
+        """Llamar justo al cerrar el micrófono (on_up)."""
         with self._lock:
             if self._volumen_real is None:
-                return  # nunca se llegó a activar (no había nada sonando)
+                return  # nunca se llegó a activar
             self._objetivo = self._volumen_real
             self._asegurar_hilo()
 
@@ -174,36 +119,18 @@ class Ducker:
             self._hilo.start()
 
     def _rampa(self) -> None:
-        # Si Spotify y YouTube suenan a la vez con volúmenes reales
-        # distintos, esto los empareja al del primer nodo encontrado en
-        # vez de llevar una rampa independiente por nodo -- caso raro (lo
-        # normal es que suene una sola cosa a la vez) y no vale la pena
-        # la complejidad de trackear varias rampas en paralelo por ahora.
-        nodos = _nodos_a_duckear()
-        if not nodos:
-            with self._lock:
-                self._objetivo = None
-            return
-
-        pids_set = frozenset(pid for _id, pid in nodos)
         with self._lock:
             actual = self._actual
-            pids_cambiaron = pids_set != self._pids_actuales
-        if actual is None or pids_cambiaron:
-            # Bootstrap: primera vez que se duckea en este proceso, o los
-            # PIDs activos cambiaron desde la última vez (ver comentario
-            # de _pids_actuales en __init__) -- en los dos casos, la
-            # única lectura real del volumen en todo este ciclo.
-            real = _volumen_nodo(nodos[0][0])
+        if actual is None:
+            # Bootstrap: primera vez que se duckea en este ciclo -- única
+            # lectura real de todo el ciclo.
+            real = _volumen_sink()
             if real is None:
-                with self._lock:
-                    self._objetivo = None
                 return
             actual = real
             with self._lock:
                 self._volumen_real = real
                 self._actual = real
-                self._pids_actuales = pids_set
 
         while True:
             with self._lock:
@@ -212,28 +139,21 @@ class Ducker:
                 return
             if abs(objetivo - actual) < _UMBRAL_LISTO:
                 actual = objetivo
-                for id_, _pid in nodos:
-                    _set_volumen_nodo(id_, actual)
+                _set_volumen_sink(actual)
                 with self._lock:
                     self._actual = actual
                     if actual == self._volumen_real:
                         # Se completó una vuelta entera (bajó y volvió a
                         # subir hasta el real): se olvida el bootstrap
-                        # para que la próxima activación relea el volumen
-                        # real de cero. Con ducking global (no solo
-                        # Spotify) esto importa más que antes -- entre
-                        # una conversación y la siguiente puede haber
-                        # arrancado una app nueva con su propio volumen,
-                        # y sin este reset se le aplicaría el valor viejo
-                        # de otra cosa en vez del suyo.
+                        # para que el próximo apretón relea el volumen
+                        # real de cero, por si el usuario lo cambió a
+                        # mano mientras tanto.
                         self._actual = None
                         self._volumen_real = None
-                        self._pids_actuales = None
                 return
             factor = _FACTOR_BAJADA if objetivo < actual else _FACTOR_SUBIDA
             actual += (objetivo - actual) * factor
-            for id_, _pid in nodos:
-                _set_volumen_nodo(id_, actual)
+            _set_volumen_sink(actual)
             with self._lock:
                 self._actual = actual
             time.sleep(_PASO_S)
