@@ -18,6 +18,7 @@
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -32,6 +33,26 @@ import {TeroIndicator} from './panel.js';
 const ANCHO = 260;
 const ALTO = 74;
 const MARGEN = 20;
+
+// D-Bus para que herramientas/mover_ventana_monitor.py pueda mover
+// cualquier ventana (X11 o Wayland nativa) sin pasar por wmctrl, que solo
+// puede tocar ventanas X11/XWayland desde afuera del compositor. Acá
+// adentro Meta.Window.move_to_monitor() no tiene esa limitación -- ver
+// [[proyecto-mover-ventana-monitor]] en la memoria del proyecto, validado
+// en vivo en el shell anidado el 2026-09-15 antes de sumarlo acá.
+const _IFAZ_VENTANAS = `
+<node>
+  <interface name="org.gnome.Shell.Extensions.Tero">
+    <method name="ListarVentanas">
+      <arg type="s" direction="out" name="json" />
+    </method>
+    <method name="MoverVentanaAMonitor">
+      <arg type="s" direction="in" name="app" />
+      <arg type="i" direction="in" name="monitor" />
+      <arg type="s" direction="out" name="resultado" />
+    </method>
+  </interface>
+</node>`;
 
 // La barra en sí es de 1px, pero el glow y el puntito de la punta se
 // salen bastante: sin este alto el dibujo queda recortado.
@@ -412,6 +433,47 @@ export default class SoulConnectorExtension extends Extension {
             'workareas-changed', () => this._ubicar());
 
         this._panel = new TeroIndicator();
+
+        this._dbusVentanas = Gio.DBusExportedObject.wrapJSObject(_IFAZ_VENTANAS, this);
+        this._dbusVentanas.export(
+            Gio.DBus.session, '/org/gnome/Shell/Extensions/Tero');
+    }
+
+    // wm_class primero: el título cambia con cada pestaña/documento
+    // abierto (mismo motivo por el que _pantalla_youtube.py identifica su
+    // ventana por PID y no por título). Si no matchea nada por wm_class
+    // se cae a buscar en el título, para apps sin wm_class útil.
+    _buscarVentana(app) {
+        const buscado = app.toLowerCase();
+        const ventanas = global.get_window_actors().map(w => w.meta_window);
+        return ventanas.find(w => (w.get_wm_class() || '').toLowerCase().includes(buscado))
+            || ventanas.find(w => (w.get_title() || '').toLowerCase().includes(buscado));
+    }
+
+    ListarVentanas() {
+        const ventanas = global.get_window_actors().map(w => ({
+            titulo: w.meta_window.get_title(),
+            wm_class: w.meta_window.get_wm_class(),
+            monitor: w.meta_window.get_monitor(),
+        }));
+        return JSON.stringify(ventanas);
+    }
+
+    MoverVentanaAMonitor(app, monitor) {
+        const cantidad = Main.layoutManager.monitors.length;
+        if (monitor < 0 || monitor >= cantidad) {
+            return JSON.stringify({
+                ok: false, error: `no hay monitor ${monitor} (hay ${cantidad})`,
+            });
+        }
+        const win = this._buscarVentana(app);
+        if (!win)
+            return JSON.stringify({ok: false, error: 'ventana no encontrada'});
+
+        win.move_to_monitor(monitor);
+        return JSON.stringify({
+            ok: true, titulo: win.get_title(), monitor,
+        });
     }
 
     _ubicar() {
@@ -445,6 +507,11 @@ export default class SoulConnectorExtension extends Extension {
     }
 
     disable() {
+        if (this._dbusVentanas) {
+            this._dbusVentanas.flush();
+            this._dbusVentanas.unexport();
+            this._dbusVentanas = null;
+        }
         if (this._idMonitores) {
             Main.layoutManager.disconnect(this._idMonitores);
             this._idMonitores = 0;

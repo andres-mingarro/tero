@@ -20,6 +20,7 @@ from ollama import Client
 import herramientas.celular  # noqa: F401
 import herramientas.clima  # noqa: F401  (registra la herramienta)
 import herramientas.mapas  # noqa: F401
+import herramientas.mover_ventana_monitor  # noqa: F401
 import herramientas.musica  # noqa: F401
 import herramientas.terminal  # noqa: F401
 import herramientas.tiempo  # noqa: F401
