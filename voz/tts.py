@@ -75,7 +75,13 @@ class TTS:
             # tranquilas de la voz (rms bajo) cerca de cero, se veían casi
             # sin movimiento. La raíz cuadrada las levanta relativamente
             # más, sin perder que los picos sigan llegando cerca de 1.
-            on_nivel(min(1.0, (rms**0.5) * 1.7))
+            # Factor 5.0 (subido de 1.7, a pedido del usuario): con 1.7 la
+            # onda apenas se movía durante el habla normal. Tope 2.2 en vez
+            # de 1.0 (el "amplitud" que recibe onda.js no tiene por qué
+            # frenar en 1.0, es solo un multiplicador más): con tope 1.0 el
+            # habla normal saturaba el 82% del tiempo y no quedaba margen
+            # para que los picos se vieran más grandes que el resto.
+            on_nivel(min(2.2, (rms**0.5) * 5.0))
             posicion += frames
             if terminado:
                 raise sd.CallbackStop

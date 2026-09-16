@@ -87,7 +87,13 @@ class Grabador:
         if self._on_nivel is not None:
             rms = float(np.sqrt(np.mean(np.square(indata))))
             self._pico_rms = max(rms, self._pico_rms * 0.999)
-            self._on_nivel(min(1.0, rms / self._pico_rms) ** 0.5)
+            # Factor 3.0 al final (a pedido del usuario, la onda se movía
+            # muy poco): amplifica el nivel ya normalizado contra el pico,
+            # no cambia la normalización en sí. Tope 2.2, no 1.0 -- mismo
+            # motivo que voz/tts.py: 1.0 se saturaba enseguida y no dejaba
+            # margen para que los picos se vieran más grandes que el resto.
+            nivel = (min(1.0, rms / self._pico_rms) ** 0.5) * 3.0
+            self._on_nivel(min(2.2, nivel))
 
     def iniciar(self) -> None:
         self._trozos = []
