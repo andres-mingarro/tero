@@ -50,18 +50,11 @@ cat << 'EOF'
                       reproducir audio (no viene en el wheel de PyPI)
   playerctl           control de reproducción (play/pausa/siguiente) vía
                       MPRIS -- lo usa la herramienta control_media
-  wmctrl              le pide al gestor de ventanas "siempre encima" para
-                      el soul-connector CLÁSICO (overlay) -- opcional, ver paso 9/11
-  libxcb-cursor0
-  libxcb-icccm4       dependencias del plugin xcb de Qt, para que el
-  libxcb-keysyms1     soul-connector clásico corra vía XWayland en sesiones Wayland nativas
-
-  (Si vas a usar el soul-connector como extensión de GNOME en vez del
-  clásico, estos tres últimos no hacen falta -- ver paso 9/11.)
+  wmctrl              posiciona y fija "siempre encima" la ventana
+                      dedicada de YouTube
 EOF
 pausa
-sudo apt install -y libportaudio2 playerctl wmctrl \
-    libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1
+sudo apt install -y libportaudio2 playerctl wmctrl
 
 # ---------------------------------------------------------------------
 seccion "4/11 — Grupo 'input' (permiso de teclado)"
@@ -130,23 +123,14 @@ EOF
 seccion "9/11 — Soul-connector (opcional, overlay animado)"
 cat << 'EOF'
 Sin esto, Tero funciona igual -- el soul-connector es un cliente aparte,
-opcional. Hay dos implementaciones, y ./tero detecta sola cuál usar.
-
-Extensión de GNOME (preferida si estás en GNOME): corre adentro de
-gnome-shell, que ya está en memoria, así que cuesta prácticamente nada
-(medido: por debajo del ruido de medición) contra ~1,3GB de RAM del
-soul-connector clásico. No necesita los paquetes Qt del paso 3/11.
+opcional, la extensión de GNOME que dibuja la onda adentro de gnome-shell
+(ya está en memoria, así que cuesta prácticamente nada medido).
 
   cd soul-connector-gnome && ./instalar.sh
 
 Es un symlink + gnome-extensions enable. En Wayland, GNOME no relee
 extensiones nuevas hasta reiniciar la sesión (logout/login) -- después
 de eso queda andando solo. ./desinstalar.sh lo saca.
-
-El soul-connector clásico (pywebview + QtWebEngine, paquetes ya
-instalados en el paso 3/11) no necesita instalación aparte: es el que
-usa ./tero si no detecta la extensión de GNOME habilitada. Funciona en
-cualquier escritorio, no solo GNOME.
 EOF
 
 # ---------------------------------------------------------------------
@@ -182,7 +166,7 @@ personal, no requiere OAuth ni proyecto de Google Cloud.
 EOF
 
 seccion "Listo"
-echo "Arrancar todo (daemon + soul-connector, el que corresponda): ./tero"
+echo "Arrancar Tero: ./tero"
 echo
 echo "Ver README.md para más detalle, e INSTALACIONES.md para el registro"
 echo "completo de qué se instaló y cómo revertirlo."

@@ -19,41 +19,8 @@ de un logout si se editó extension.js después del último arranque de
 sesión -- GNOME cachea el código, ver README de esa carpeta).
 """
 
-import json
-import re
-import subprocess
-
 from herramientas import herramienta
-
-_BUS = "org.gnome.Shell"
-_PATH = "/org/gnome/Shell/Extensions/Tero"
-_IFAZ = "org.gnome.Shell.Extensions.Tero"
-
-
-def _llamar(metodo: str, *args: str) -> dict:
-    proceso = subprocess.run(
-        [
-            "gdbus", "call", "--session",
-            "--dest", _BUS,
-            "--object-path", _PATH,
-            "--method", f"{_IFAZ}.{metodo}",
-            *args,
-        ],
-        capture_output=True, text=True, timeout=5, check=False,
-    )
-    if proceso.returncode != 0:
-        error = proceso.stderr.strip()
-        if "UnknownMethod" in error or "UnknownObject" in error:
-            return {
-                "ok": False,
-                "error": "la extensión de Tero en GNOME todavía no tiene esta "
-                "función cargada (hace falta cerrar sesión y volver a entrar)",
-            }
-        return {"ok": False, "error": error}
-    coincidencia = re.search(r"^\(\s*'(.*)'\s*,?\)\s*$", proceso.stdout.strip(), re.DOTALL)
-    if not coincidencia:
-        return {"ok": False, "error": f"respuesta inesperada de D-Bus: {proceso.stdout!r}"}
-    return json.loads(coincidencia.group(1))
+from herramientas._gnome_dbus import llamar
 
 
 @herramienta
@@ -64,7 +31,7 @@ def mover_ventana_a_monitor(app: str, monitor: int) -> str:
     "terminal", "spotify", "code").
     monitor: número de monitor, empezando en 1.
     """
-    resultado = _llamar("MoverVentanaAMonitor", app, str(monitor - 1))
+    resultado = llamar("MoverVentanaAMonitor", app, str(monitor - 1))
     if not resultado.get("ok"):
         error = resultado.get("error", "error desconocido")
         if "no encontrada" in error:

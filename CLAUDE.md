@@ -103,7 +103,7 @@ necesidad.
 | Tecla global | — | `pynput` | `evdev` |
 | Ventana activa | — | `pygetwindow` / Win32 | `wmctrl` / D-Bus |
 | Media | — | teclas multimedia | MPRIS (`playerctl`) + Web API de Spotify |
-| Overlay | pywebview (Qt) + WebSocket | — | `QT_QPA_PLATFORM=xcb` (sin `gtk4-layer-shell`, no instalado) |
+| Overlay | pywebview (Qt) + WebSocket — deprecado 2026-09-16, ver "El soul-connector" | — | Extensión de GNOME Shell (`soul-connector-gnome/`), única implementación activa |
 
 ### STT: Groq online, Whisper local de respaldo
 
@@ -155,32 +155,49 @@ tero/
   cerebro/           router.py, prompt.py
   herramientas/      musica.py, clima.py, web.py, mapas.py, celular.py,
                      terminal.py, tiempo.py, volumen.py, youtube.py,
+                     mover_ventana_monitor.py, captura_pantalla.py,
                      _spotify_auth.py, _telegram.py, _ducking.py,
-                     _pantalla_youtube.py, codex.py (fase 4)
-  soul_connector/    server.py, ventana.py, audio_sistema.py, index.html,
-                     siriwave.umd.js (vendorizada)
-  soul-connector-gnome/  extension.js, onda.js, barra.js, mover.js, enlace.js
-                     (misma onda, como extensión de GNOME Shell)
+                     _pantalla_youtube.py, _gnome_dbus.py, codex.py (fase 4)
+  soul_connector/    server.py, audio_sistema.py -- infraestructura
+                     compartida (WebSocket + audio de sistema), no overlay;
+                     el overlay en sí (pywebview) se deprecó, ver "El
+                     soul-connector"
+  soul-connector-gnome/  extension.js (solo visual), onda.js, barra.js,
+                     particulas.js, mover.js, enlace.js, panel.js --
+                     overlay activo, extensión de GNOME Shell
+                     puente.js: D-Bus hacia adentro del compositor, todo
+                     lo no-visual, separado a propósito — ver Reglas de
+                     arquitectura
   config.toml
 ```
 
-### Capa de plataforma (clave para la migración)
+### Capa de plataforma (clave para la migración, si algún día pasa)
 
-Una sola interfaz de cinco funciones. El resto del programa nunca sabe en
-qué sistema corre. Migrar a Linux = escribir un archivo de ~150 líneas.
+Interfaz mínima: solo lo que de verdad no tiene otra forma de resolverse
+sin saber en qué sistema corre.
 
 ```python
 # plataforma/base.py
 class Plataforma:
     def escuchar_tecla(self, on_down, on_up): ...
-    def ventana_activa(self) -> dict:         ...
-    def capturar_pantalla(self) -> bytes:     ...
-    def media(self, accion: str):             ...
     def notificar(self, texto: str):          ...
 ```
 
 El audio **no** entra en esta abstracción: `sounddevice` ya es
 multiplataforma.
+
+Originalmente tenía cinco métodos (`ventana_activa`, `capturar_pantalla`,
+`media` también) pero, con el proyecto siempre en Linux (nunca hubo
+`windows.py` que justificara pasar todo por acá), ninguno de esos tres
+llegó a tener un caller real — cada herramienta que necesitaba algo así
+terminó llamando directo a su API real de Linux (`leer_terminal` usa
+AT-SPI propio, `control_media` llama `playerctl` directo,
+`capturar_pantalla` usa D-Bus a la extensión de GNOME). Se sacaron de la
+interfaz el 2026-09-16 (hallazgo de la auditoría de ese día, decisión
+explícita del usuario: "sacarlos, no dejarlos como fósiles"). Si el día
+de mañana aparece un motivo real para portar a otro SO, se agregan de
+nuevo con el uso real en mente — ver Reglas de arquitectura, "sin
+abstracciones antes de tiempo".
 
 ### Herramientas
 
@@ -198,8 +215,7 @@ herramientas = [
 ]
 ```
 
-Catálogo completo ✅ salvo `capturar_pantalla` (fase 3, atado a
-`Plataforma.capturar_pantalla`) y `delegar_a_codex` (fase 4).
+Catálogo completo ✅ salvo `delegar_a_codex` (fase 4).
 `consultar_hora` no estaba en el plan original: se agregó porque el modelo
 local no tiene noción de reloj y "qué hora es"/"qué día es hoy" lo
 necesitan. `calcular_viaje` y `mandar_al_celular` tampoco estaban en el
@@ -313,6 +329,22 @@ Notas por herramienta:
   propósito **no** se revisa el portapapeles de Ctrl+C: el usuario puede
   tener algo copiado ahí para otra cosa y no quiere que Tero se lo lleve
   puesto.
+- **Captura de pantalla** (`herramientas/captura_pantalla.py`, fase 3 ✅):
+  el D-Bus público `org.gnome.Shell.Screenshot` tira `AccessDenied:
+  Screenshot is not allowed` a cualquier llamador externo (GNOME reciente
+  lo reserva para el portal) — mismo problema de fondo que mover una
+  ventana Wayland nativa desde afuera. Se resuelve igual: un método D-Bus
+  propio (`CapturarPantalla`, en `soul-connector-gnome/puente.js`, ver
+  Reglas de arquitectura) que usa `Shell.Screenshot` desde **adentro**
+  del compositor, sin pasar por esa restricción. Guarda un PNG en `/tmp` y
+  devuelve la ruta — no pasa por `plataforma/` (esa capa quedó reducida a
+  solo lo que de verdad no tiene otra forma de resolverse, ver "Capa de
+  plataforma": todo lo Linux-específico de `herramientas/` llama directo
+  a su API real). El
+  modelo local es texto puro, no interpreta la imagen — eso es trabajo de
+  `delegar_a_codex` (fase 4), pasándole la ruta con el flag `-i` de
+  `codex exec` (sube la imagen por la sesión de ChatGPT Plus ya logueada,
+  sin API key, sin exponerla por URL — ver Restricción de presupuesto).
 
 ### `delegar_a_codex`
 
@@ -335,20 +367,19 @@ timeout generoso, salida capturada. Tres cuidados:
 
 ## El soul-connector (overlay) ✅
 
-Es render, no IA. No hace falta sincronía labial ni fonemas. Implementado
-con `pywebview` (backend Qt/QtWebEngine — no hay PyGObject en este
-entorno, así que GTK no está disponible) renderizando
-`soul_connector/index.html` (SiriWave vendorizada), y
-`soul_connector/server.py` mandándole niveles/estado por WebSocket local
-(`ws://127.0.0.1:8765`).
-
-Hay una segunda implementación, `soul-connector-gnome/`: la misma onda
-pero como extensión de GNOME Shell, corriendo adentro de `gnome-shell` en
-vez de levantar un Chromium propio (~1,3 GB de RAM medidos vs. por debajo
-del ruido de medición). `./tero` detecta sola cuál usar — ver
+Es render, no IA. No hace falta sincronía labial ni fonemas. Única
+implementación activa: `soul-connector-gnome/`, extensión de GNOME Shell
+— corre adentro de `gnome-shell`, que ya está en memoria, así que cuesta
+prácticamente nada (medido: por debajo del ruido de medición). Ver
 `soul-connector-gnome/README.md` para el detalle completo (geometría
-medida, trampas de GNOME 50, arrastre con el mouse). Lo que sigue acá
-describe la implementación original en pywebview.
+medida, trampas de GNOME 50, arrastre con el mouse).
+
+Infraestructura compartida en `soul_connector/` (no es la implementación
+vieja completa, sobrevivió a la deprecación de abajo porque no es render):
+`server.py` sirve el WebSocket local (`ws://127.0.0.1:8765`) por el que
+`main.py` manda niveles/estado, y `audio_sistema.py` lee el audio de
+salida del sistema (PipeWire) para el estado "música". Ninguno de los dos
+sabe ni le importa qué cliente los está escuchando.
 
 - Señal: RMS real, no solo del TTS. Tres fuentes según el estado:
   el audio del TTS mientras habla, el **micrófono en vivo** mientras
@@ -359,30 +390,55 @@ describe la implementación original en pywebview.
   (PipeWire, `soul_connector/audio_sistema.py`) cuando no pasa nada más.
 - **Suavizado asimétrico**: ataque rápido, decaimiento lento. Esto es lo
   que separa "se ve pro" de "se ve amateur". El RMS crudo tiembla.
-- Ventana: sin bordes, sin foco. "Siempre encima" no es persistente bajo
-  Mutter sin `gtk4-layer-shell` (no instalado): se fuerza
-  `QT_QPA_PLATFORM=xcb` para que la ventana sea una ventana X11/XWayland
-  real que `wmctrl` puede manipular, y se reintenta "traer al frente" en
-  bucle mientras habla. Reposicionar por código (x/y de creación,
-  `wmctrl -e`) no tiene ningún efecto en este entorno (confirmado); la
-  única forma real de moverla es arrastrarla (`easy_drag=True`), y no hay
-  forma de persistir esa posición entre reinicios del proceso.
-- Colores por estado: la onda usa el estilo `"ios9"` de SiriWave, que
-  ignora el color del constructor y trae sus curvas hardcodeadas en
-  azul/rojo/verde — hay que recolorear las curvas a mano en cada cambio
-  de estado (ver `aplicarEstado()` en `index.html`) para que el color
-  realmente cambie, no alcanza con el `drop-shadow` de afuera.
-- Cuatro estados visuales: **escuchando** (blanco, reactivo al mic),
+- Colores por estado: la onda usa el estilo `"ios9"` de SiriWave (portado
+  a Cairo en `soul-connector-gnome/onda.js`), que ignora el color del
+  constructor y trae sus curvas hardcodeadas en azul/rojo/verde — hay que
+  recolorear las curvas a mano en cada cambio de estado para que el color
+  realmente cambie, no alcanza con un glow de afuera.
+- Cinco estados visuales: **escuchando** (blanco, reactivo al mic),
   **pensando** (violeta claro), **hablando** (multicolor original de la
   librería — a pedido explícito del usuario, es el único estado que no
   se fuerza a un color plano), **música** (turquesa, reactivo al audio
-  del sistema). Más un idle que respira.
+  del sistema), **codex** (cian + partículas, para cuando Tero delegue en
+  Codex/ChatGPT — fase 4, visual ya implementado). Más un idle que respira.
 - Debajo de la onda, nombre de la canción + barra de progreso de lo que
   suena en Spotify (polling cada ~5s, interpolado en cada frame). Se
   oculta sola si queda pausada 30s seguidos.
 
-**El daemon tiene que funcionar sin el soul-connector.** La ventana es un
-cliente opcional del stream de niveles.
+**El daemon tiene que funcionar sin el soul-connector.** Es un cliente
+opcional del stream de niveles, nunca una dependencia — ver Reglas de
+arquitectura.
+
+### Overlay pywebview: deprecado (2026-09-16)
+
+Hasta acá hubo una segunda implementación completa del overlay,
+`soul_connector/ventana.py` + `index.html` + `siriwave.umd.js`
+(pywebview, backend Qt/QtWebEngine), corriendo como proceso aparte —
+único motivo por el que existió: funcionaba en cualquier escritorio, no
+solo GNOME. Costaba ~1,3 GB de RAM (un Chromium entero para dibujar una
+onda de 260x74) contra el ruido de medición de la extensión, y mantener
+dos implementaciones del mismo feature en paralelo era mantenimiento
+duplicado real — nada garantizaba que se mantuvieran sincronizadas más
+que la disciplina de quien editaba (ver Reglas de arquitectura, hallazgo
+de la auditoría del mismo día). Se sacó del repo (`git rm`), junto con la
+dependencia `pywebview[qt]` de `pyproject.toml` (se llevó 17 paquetes
+transitivos de Qt/PyQt6) y la rama del launcher `./tero` que la levantaba.
+El detalle de cómo estaba resuelto el "siempre encima" en Wayland sin
+`gtk4-layer-shell` (`QT_QPA_PLATFORM=xcb`, `wmctrl`, arrastre con
+`easy_drag`) quedó en el historial de git si hace falta retomarlo.
+
+### `puente.js`: lo no-visual vive aparte (2026-09-16)
+
+`soul-connector-gnome/extension.js` (la clase `SoulConnector`) es *solo*
+render — nada de lógica de Tero. Dos herramientas (`mover_ventana_a_monitor`,
+`capturar_pantalla`) necesitan código corriendo adentro de gnome-shell por
+una razón técnica real (Wayland no deja hacer ciertas cosas desde afuera
+del compositor: mover una ventana nativa, saltear el `AccessDenied` del
+D-Bus de screenshot), no por elección de diseño. Ese código vive en
+`soul-connector-gnome/puente.js` (clase `Puente`, expone
+`org.gnome.Shell.Extensions.Tero` por D-Bus), separado del archivo de la
+onda — `extension.js` solo lo instancia en `enable()`/`disable()`, igual
+que ya hacía con `TeroIndicator` (panel.js). Ver Reglas de arquitectura.
 
 ---
 
@@ -473,6 +529,105 @@ que `./tero` distingue de una caída de verdad.
 
 ---
 
+## Reglas de arquitectura (para no volverse un zombie)
+
+Nacieron el 2026-09-16 cuando `soul-connector-gnome/extension.js` empezó a
+juntar, además de la onda, dos herramientas D-Bus sin relación entre sí
+(mover ventanas, capturar pantalla). Se corrigió (ver `puente.js` arriba),
+pero la tentación de ir agregando código donde sea más cómodo en el
+momento va a volver a aparecer. Estas reglas están para frenarla en la
+próxima herramienta, no solo en esta:
+
+- **Cada pieza hace una sola cosa, y SOUL nunca es lógica.** El
+  soul-connector (`soul-connector-gnome/extension.js`, la clase
+  `SoulConnector`; `soul_connector/` es solo la infraestructura
+  compartida de WebSocket/audio, no render) es render puro — dibuja la
+  onda, manda su posición, y nada más. **Tero
+  (el daemon) tiene que funcionar perfectamente sin SOUL** — es un cliente
+  opcional del WebSocket de niveles, nunca una dependencia. Si algo tiene
+  que correr adentro de gnome-shell por necesidad técnica real (no por
+  comodidad), va en un archivo aparte, nunca mezclado con la clase que
+  dibuja (ver `puente.js`). Antes de sumar un método nuevo ahí, primero
+  confirmar que de verdad no se puede hacer desde el proceso de Tero
+  (Python) — la mayoría de las cosas sí se pueden (AT-SPI, D-Bus público,
+  `playerctl`, `wmctrl`); esta puerta es solo para lo que Wayland/Mutter
+  bloquea desde afuera del compositor.
+- **Sin abstracciones antes de tiempo.** Una herramienta nueva es un
+  archivo de ~20-30 líneas en `herramientas/` (ver esa sección). No se
+  factoriza nada hasta que hay un segundo caso real que lo necesite —
+  `herramientas/_gnome_dbus.py` se extrajo recién cuando `capturar_pantalla`
+  fue la segunda herramienta en necesitar el mismo llamado D-Bus, no
+  antes. La interfaz `Plataforma` (`plataforma/base.py`) es el ejemplo de
+  lo contrario: se diseñó para una migración a Windows que nunca pasó, y
+  hoy la mayoría de las herramientas Linux-específicas la ignoran y
+  llaman a su API real directo — no vale la pena consolidar eso sin un
+  motivo real (ver nota en "Capa de plataforma").
+- **Nada de listas cerradas que no generalizan** (`Literal[...]`, enums
+  hardcodeados) para algo que el mundo real no tiene como lista fija —
+  ver el caso de youtube_canales, que empezó como `Literal` de siete
+  canales y se reescribió a aprendizaje por uso.
+- **El ruteo sale del tool calling, nunca de un clasificador aparte.**
+  "Esto lo resuelvo yo" vs. "esto lo mando a Codex" lo decide el modelo
+  local viendo el catálogo de herramientas (`delegar_a_codex` es una
+  herramienta más), no un paso previo con reglas de texto (ver Cerebro).
+- **Confirmación explícita para lo destructivo o costoso**, nunca
+  silencioso — ver Seguridad y los tres cuidados de `delegar_a_codex`.
+- **`BITACORA.html` se mantiene, y es responsabilidad del agente, no del
+  usuario.** Decisión explícita (2026-09-16, ante la pregunta de si
+  convenía dejarla morir): se conserva como el diario narrado de "qué se
+  fue haciendo y por qué" (distinto de `git log`, que dice *qué* cambió
+  pero no el razonamiento en vivo detrás). Cualquier agente que termine
+  una sesión de trabajo real en este repo (features, bugs resueltos,
+  decisiones de arquitectura como esta) **tiene que agregar una entrada
+  antes de cerrar** — no esperar a que el usuario lo pida. Formato:
+  sección `<div class="entrada">` dentro del `<section class="dia">` de
+  la fecha (crear el `<section>` si es un día nuevo), con un
+  `<span class="tag">` (`feature`/`bug`/`fix`/`decisión`/`config`/`infra`/
+  `commit`) y uno o más `<p>` contando el motivo y lo que se probó en
+  vivo — mismo nivel de detalle que las entradas ya escritas, no un
+  resumen de una línea.
+
+### Auditoría 2026-09-16: dónde está parado el proyecto
+
+Pedida explícitamente por el usuario ("después de tantos días de
+desarrollo puede pasar que la app se transforme en un engendro") para
+chequear el estado real contra estas reglas, no solo confiar en que se
+están siguiendo. Veredicto: **con ~5000 líneas (3450 Python + 1600 JS),
+todavía no es un engendro** — capas separadas por responsabilidad, cero
+`except:` desnudos, herramientas chicas y autocontenidas. Los hallazgos
+de esa auditoría, y lo que se hizo/queda con cada uno:
+
+- **Dos implementaciones paralelas del overlay** (pywebview vs. extensión
+  de GNOME) — el riesgo más real que había: nada garantizaba que se
+  mantuvieran sincronizadas más que la disciplina de quien editara.
+  **Resuelto el mismo día**: se deprecó pywebview (ver "El soul-connector",
+  sección "Overlay pywebview: deprecado").
+- **`Plataforma` (`plataforma/base.py`) sin uso real** en 3 de sus 5
+  métodos (`ventana_activa`, `capturar_pantalla`, `media`). **Resuelto el
+  2026-09-16**: decisión del usuario, se sacaron de la interfaz — ver
+  "Capa de plataforma".
+- **Cero tests automatizados.** Hay comportamientos críticos documentados
+  *solo en prosa* acá (ej. "0/12 vs 12/12 tool calls" con historial en
+  prosa en Fase 2, el fix de preguntas colgadas en `cerebro/router.py`, el
+  bug de PIDs en `_ducking.py`), verificados una vez a mano y nunca más.
+  Sin un test que lo capture, un cambio futuro puede reintroducir el mismo
+  bug sin que nadie lo note hasta escucharlo fallar en vivo. **Pendiente**:
+  no hace falta un framework grande, alcanza con 5-10 casos de regresión
+  para lo ya medido acá.
+- **`BITACORA.html` desactualizado** desde 2026-09-14 pese a comits
+  posteriores. **Decisión del usuario (2026-09-16): se mantiene**, y pasa
+  a ser responsabilidad del agente que trabaje en el proyecto, no del
+  usuario, mantenerla al día — ver regla nueva abajo.
+- **`soul-connector-gnome/extension.js` como candidato natural a
+  acumular** la próxima feature visual que se apile ahí en vez de en un
+  archivo propio (como ya hacen `onda.js`/`barra.js`/`particulas.js`).
+  No es un problema hoy, es una advertencia para la próxima vez.
+
+Pendiente para retomar, en orden: fase 4 (`delegar_a_codex`, siguiendo las
+reglas de arriba) y los tests de regresión.
+
+---
+
 ## Fases
 
 1. **Esqueleto** ✅ — tecla, grabación, Whisper, TTS. Commit `630b3a4`.
@@ -496,21 +651,21 @@ que `./tero` distingue de una caída de verdad.
    Lección para el futuro: si el modelo chico empieza a portarse mal,
    sospechar primero de lo que Tero le está metiendo en el contexto,
    antes de culpar al sampling o de agregar otra regla al prompt.
-3. **Contexto** — captura bajo demanda. `leer_terminal` migrado a AT-SPI
-   ✅ (ver Herramientas), sin ventana activa expuesta como dato aparte —
-   se usa internamente solo para saber qué está enfocado, no se muestra
-   a ningún lado. Falta `capturar_pantalla`.
+3. **Contexto** ✅ — captura bajo demanda. `leer_terminal` migrado a
+   AT-SPI (ver Herramientas), sin ventana activa expuesta como dato
+   aparte — se usa internamente solo para saber qué está enfocado, no se
+   muestra a ningún lado. `capturar_pantalla` (2026-09-16): guarda la
+   captura, todavía no la interpreta nadie — eso es trabajo de la fase 4.
 4. **Codex** — la rama pesada. No arrancado.
 5. **Soul-connector** ✅ — overlay con WebSocket, ver sección dedicada más arriba.
 6. **Linux** ✅ — `plataforma/linux.py` ya existe y funciona (desarrollo
    pasó a Linux desde el arranque del proyecto; no hay
    `plataforma/windows.py`).
 
-Estado actual: **fases 1, 2, 5 y 6 completas y commiteadas.** Pendiente
-para retomar:
-- Fase 3 (Contexto): `leer_terminal` ya migrado a AT-SPI (2026-09-13).
-  Falta `capturar_pantalla` (depende de `Plataforma.capturar_pantalla`).
-- `delegar_a_codex` (fase 4) sigue sin arrancar.
+Estado actual: **fases 1, 2, 3, 5 y 6 completas.** Pendiente para
+retomar:
+- `delegar_a_codex` (fase 4) sigue sin arrancar — es lo único que falta
+  del catálogo completo de herramientas.
 
 ---
 

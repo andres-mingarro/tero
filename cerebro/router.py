@@ -17,6 +17,7 @@ import re
 
 from ollama import Client
 
+import herramientas.captura_pantalla  # noqa: F401
 import herramientas.celular  # noqa: F401
 import herramientas.clima  # noqa: F401  (registra la herramienta)
 import herramientas.mapas  # noqa: F401

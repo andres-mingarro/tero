@@ -1,25 +1,29 @@
 # Soul Connector de Tero como extensión de GNOME Shell
 
-La misma onda que `soul_connector/` (pywebview), pero dibujada adentro de
-gnome-shell en vez de adentro de un Chromium propio.
+La onda de Tero, dibujada adentro de gnome-shell. Es la única
+implementación del overlay — hubo una segunda, en pywebview (un
+Chromium propio para renderizar), deprecada el 2026-09-16 (ver
+CLAUDE.md, "Reglas de arquitectura"): mantener dos implementaciones del
+mismo feature en paralelo era riesgo real de que se desincronizaran, sin
+que nada lo avisara si pasaba.
 
-**Por qué:** el soul-connector de pywebview se lleva ~1,3 GB de RAM
-(medido) porque levanta QtWebEngine — un navegador entero — para dibujar
-una onda de 260x74. Acá el dibujo corre en el proceso de gnome-shell, que
-ya está en memoria.
+**Por qué esta y no la de pywebview:** esa se llevaba ~1,3 GB de RAM
+(medido) porque levantaba QtWebEngine — un navegador entero — para
+dibujar una onda de 260x74. Acá el dibujo corre en el proceso de
+gnome-shell, que ya está en memoria.
 
-**Medición del reemplazo**, comparando el PSS de gnome-shell con la
-extensión habilitada y deshabilitada:
+**Medición**, comparando el PSS de gnome-shell con la extensión
+habilitada y deshabilitada:
 
 | | RAM |
 |---|---|
-| Soul-connector pywebview (QtWebEngine + Python) | ~1300 MB |
+| Soul-connector pywebview (QtWebEngine + Python, deprecado) | ~1300 MB |
 | Soul-connector extensión | **por debajo del ruido de medición** (±1,4 MB) |
 
 El proceso de gnome-shell fluctúa más de lo que cuesta la extensión.
 
 De yapa resuelve un problema viejo: el "siempre encima" nunca funcionó
-bien bajo Mutter, y el soul-connector de pywebview lo peleaba llamando a
+bien bajo Mutter, y el overlay de pywebview lo peleaba llamando a
 `wmctrl` en un bucle mientras Tero hablaba. Siendo parte del shell no hay
 nada que pelear.
 
@@ -44,18 +48,17 @@ reloguear ya queda andando sola.
 
 Y se fue. Esto está pensado así desde el diseño:
 
-- **No toca el daemon.** La extensión es otro cliente más del WebSocket de
-  niveles (`ws://127.0.0.1:8765`), el mismo que ya consume
-  `soul_connector/`. No hay una sola línea distinta en `main.py`,
-  `soul_connector/server.py` ni en las herramientas. Volver a la rama
-  `main` no requiere deshacer nada acá.
+- **No toca el daemon.** La extensión es un cliente del WebSocket de
+  niveles (`ws://127.0.0.1:8765`, servido por `soul_connector/server.py`,
+  que no sabe ni le importa qué lo está mirando). No hay una sola línea
+  distinta en `main.py` ni en las herramientas.
 - **No instala nada a nivel sistema.** Ni paquetes, ni servicios, ni sudo.
   Lo único que deja fuera del repo es un symlink en el home y el uuid
   anotado en dconf; `desinstalar.sh` borra las dos cosas.
-- **El soul-connector de pywebview sigue intacto.** `soul_connector/` no
-  se tocó: si sacás la extensión, `./tero` vuelve a levantarlo solo
-  (detecta si la extensión está habilitada y en ese caso no lo levanta,
-  para no tener dos ondas superpuestas).
+- **Si sacás la extensión, Tero se queda sin onda en pantalla, pero sigue
+  andando igual** — el daemon nunca depende de que haya alguien
+  escuchando el WebSocket (ver CLAUDE.md, "Reglas de arquitectura": SOUL
+  es un cliente opcional, nunca una dependencia).
 - **Si la extensión falla, falla sola.** GNOME la deshabilita y sigue; no
   se lleva puesta la sesión.
 
@@ -63,7 +66,8 @@ Y se fue. Esto está pensado así desde el diseño:
 
 | | |
 |---|---|
-| `extension.js` | Integración con el shell: widget flotante, estados, reproductor |
+| `extension.js` | Integración con el shell: widget flotante, estados, reproductor — **solo visual**, ver `puente.js` |
+| `puente.js` | Todo lo no-visual que igual necesita correr adentro de gnome-shell (mover ventanas, capturar pantalla) — expuesto por D-Bus, separado a propósito de lo visual |
 | `onda.js` | Port a Cairo del estilo `ios9` de SiriWave (la matemática de la onda) |
 | `enlace.js` | Cliente WebSocket del stream de niveles del daemon |
 | `stylesheet.css` | Tipografías y colores del nombre de canción y la barra |

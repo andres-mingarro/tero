@@ -18,17 +18,5 @@ class Plataforma(ABC):
         """
 
     @abstractmethod
-    def ventana_activa(self) -> dict:
-        """Devuelve info de la ventana con foco: {"titulo": str, "app": str}."""
-
-    @abstractmethod
-    def capturar_pantalla(self) -> bytes:
-        """Captura la pantalla actual y devuelve PNG en bytes."""
-
-    @abstractmethod
-    def media(self, accion: str) -> None:
-        """Envía una acción de control multimedia: play_pause, siguiente, anterior."""
-
-    @abstractmethod
     def notificar(self, texto: str) -> None:
         """Muestra una notificación de escritorio."""

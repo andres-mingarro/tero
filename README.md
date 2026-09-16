@@ -46,15 +46,14 @@ uv sync
 ### 2. Paquetes de sistema
 
 ```bash
-sudo apt install -y libportaudio2 playerctl wmctrl \
-    libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1
+sudo apt install -y libportaudio2 playerctl wmctrl
 ```
 
 | Paquete | Para qué |
 |---|---|
 | `libportaudio2` | Lib nativa de `sounddevice`, no viene en el wheel de PyPI |
 | `playerctl` | Control de reproducción (play/pausa/siguiente) vía MPRIS |
-| `wmctrl`, `libxcb-cursor0`, `libxcb-icccm4`, `libxcb-keysyms1` | Solo para el soul-connector **clásico** (overlay pywebview) — ver "El soul-connector" más abajo. El soul-connector como extensión de GNOME no los necesita |
+| `wmctrl` | Posicionar la ventana dedicada de YouTube y leer terminal por AT-SPI (ver `herramientas/_pantalla_youtube.py`, `herramientas/_leer_terminal_atspi.py`) |
 
 ### 3. Permisos de teclado
 
@@ -202,14 +201,14 @@ Tero
   … Arrancando el daemon (carga la voz; Whisper local solo si Groq falla)
   ✓ Voz cargada
   ✓ Daemon escuchando (tecla: KEY_RIGHTCTRL)
-  ✓ Soul-connector: usando la extensión de GNOME (no hace falta la de pywebview)
+  ✓ Soul-connector: extensión de GNOME activa
 
   Todo listo. Ctrl+C para cortar todo.
 ```
 
-(La última línea depende de cuál detecte: `Soul-connector en pantalla` si
-usa el clásico, o un aviso si no levantó ninguno de los dos — nunca corta
-el arranque, el soul-connector siempre es opcional.)
+(Si la extensión no está instalada/habilitada, esa línea es un aviso en
+vez de un check — nunca corta el arranque, el soul-connector siempre es
+opcional.)
 
 Se niega a arrancar si ya hay otro Tero corriendo: dos daemons cargan dos
 veces Whisper `large-v3` en la GPU y el segundo muere con `CUDA failed
@@ -217,9 +216,8 @@ with error out of memory`.
 
 Los logs quedan en `logs/` (ignorado por git): `tero.log` tiene el arranque
 paso a paso más la salida del daemon (transcripción, qué herramienta se
-llamó, tiempos de cada etapa), `soul_connector.log` el ruido de la
-ventana. Cada corrida empieza un log nuevo y conserva el anterior como
-`.1`.
+llamó, tiempos de cada etapa). Cada corrida empieza un log nuevo y
+conserva el anterior como `.1`.
 
 Para tenerlo a mano desde cualquier lado:
 
@@ -232,11 +230,10 @@ ln -s "$PWD/tero" ~/.local/bin/tero   # opcional
 Para desarrollo, si querés correr solo una parte:
 
 ```bash
-uv run python main.py                          # solo el daemon
-QT_QPA_PLATFORM=xcb uv run python -m soul_connector.ventana   # solo el soul-connector clásico
+uv run python main.py   # solo el daemon
 ```
 
-(El soul-connector como extensión de GNOME no se lanza así: una vez
+(El soul-connector, la extensión de GNOME, no se lanza así: una vez
 instalado, vive dentro de `gnome-shell` y anda solo.)
 
 ### El soul-connector (overlay opcional)
@@ -245,33 +242,28 @@ Onda animada que reacciona a la voz de Tero, al micrófono mientras
 escucha, y a la música de fondo, más el nombre/progreso de lo que suena en
 Spotify (se oculta sola si queda pausado 30s) y, mientras arranca, en qué
 etapa de carga va. Es un cliente aparte, opcional — el daemon principal
-funciona sin él, y `./tero` sigue adelante si no levanta.
+funciona sin él, y `./tero` sigue adelante si no está.
 
-Hay dos implementaciones, y `./tero` detecta sola cuál usar:
+Implementado como extensión de GNOME Shell (`soul-connector-gnome/`):
+corre adentro de `gnome-shell`, que ya está en memoria, así que cuesta
+prácticamente nada (medido: por debajo del ruido de medición del propio
+`gnome-shell`). Se mueve con `Ctrl+Alt` + arrastrar. Instalación:
 
-- **Extensión de GNOME** (`soul-connector-gnome/`, preferida si estás en
-  GNOME): corre adentro de `gnome-shell`, que ya está en memoria, así que
-  cuesta prácticamente nada (medido: por debajo del ruido de medición del
-  propio `gnome-shell`) contra ~1,3 GB de RAM del soul-connector clásico.
-  Se mueve con `Ctrl+Alt` + arrastrar. Instalación:
+```bash
+cd soul-connector-gnome && ./instalar.sh
+```
 
-  ```bash
-  cd soul-connector-gnome && ./instalar.sh
-  ```
+Es un symlink a esta carpeta del repo + `gnome-extensions enable`. En
+Wayland, GNOME no relee extensiones nuevas hasta reiniciar la sesión
+(cerrar sesión y volver a entrar) — después de eso queda andando solo.
+`./desinstalar.sh` lo saca. Detalle completo, incluidas las trampas de
+GNOME 50, en `soul-connector-gnome/README.md`.
 
-  Es un symlink a esta carpeta del repo + `gnome-extensions enable`. En
-  Wayland, GNOME no relee extensiones nuevas hasta reiniciar la sesión
-  (cerrar sesión y volver a entrar) — después de eso queda andando solo.
-  `./desinstalar.sh` lo saca. Detalle completo, incluidas las trampas de
-  GNOME 50, en `soul-connector-gnome/README.md`.
-
-- **Overlay clásico** (`soul_connector/`, pywebview + QtWebEngine):
-  funciona en cualquier escritorio, no solo GNOME, a cambio de esos
-  ~1,3 GB de RAM. Es el que usa `./tero` si no detecta la extensión de
-  GNOME habilitada. El `QT_QPA_PLATFORM=xcb` (que `./tero` ya pone solo)
-  es necesario en sesiones Wayland nativas: sin eso, la ventana no puede
-  pedirle al gestor de ventanas que se quede "siempre encima" mientras
-  habla.
+(Hubo una segunda implementación, pywebview + QtWebEngine, que funcionaba
+en cualquier escritorio — se deprecó el 2026-09-16: mantener dos overlays
+del mismo feature en paralelo era riesgo de que se desincronizaran sin que
+nada lo avisara, y la de GNOME ya cubre el caso real de uso. Ver CLAUDE.md,
+"Reglas de arquitectura".)
 
 ## Herramientas disponibles
 

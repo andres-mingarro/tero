@@ -4,8 +4,9 @@
 # Lo único que esta extensión deja fuera del repo es un symlink y el uuid
 # anotado en la lista de extensiones de GNOME (dconf). Esto borra las dos
 # cosas. No hay paquetes de sistema que desinstalar, ni cambios en el
-# daemon que revertir: el soul-connector de pywebview (soul_connector/) sigue intacto y
-# funcionando, y volver a la rama main no requiere hacer nada acá.
+# daemon que revertir. Ojo: es la única implementación del overlay que
+# queda (la de pywebview se deprecó, ver CLAUDE.md); sin esta extensión
+# Tero sigue funcionando, solo que sin onda en pantalla.
 
 set -euo pipefail
 
@@ -42,4 +43,4 @@ fi
 
 echo
 echo "Listo. El código sigue en el repo; esto solo lo desconectó de GNOME."
-echo "El soul-connector original (pywebview) no fue tocado: uv run python -m soul_connector.ventana"
+echo "Tero sigue andando, sin onda en pantalla (SOUL es un cliente opcional)."

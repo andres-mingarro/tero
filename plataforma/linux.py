@@ -84,18 +84,5 @@ class PlataformaLinux(Plataforma):
                 selector.unregister(dispositivo)
                 dispositivo.close()
 
-    def ventana_activa(self) -> dict:
-        # Fase 3. En GNOME/Wayland no hay una API estándar sin una extensión
-        # de gnome-shell que exponga esto por D-Bus.
-        raise NotImplementedError("ventana_activa llega en la fase 3 (Contexto)")
-
-    def capturar_pantalla(self) -> bytes:
-        # Fase 3.
-        raise NotImplementedError("capturar_pantalla llega en la fase 3 (Contexto)")
-
-    def media(self, accion: str) -> None:
-        # Fase 2, herramienta control_media. Requiere playerctl instalado.
-        raise NotImplementedError("media llega en la fase 2 (Cerebro)")
-
     def notificar(self, texto: str) -> None:
         subprocess.run(["notify-send", "Tero", texto], check=False)
