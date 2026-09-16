@@ -96,7 +96,7 @@ class TeroToggle extends QuickSettings.QuickMenuToggle {
         proceso.communicate_utf8_async(null, null, (_p, resultado) => {
             let salida = '';
             try {
-                [salida] = proceso.communicate_utf8_finish(resultado);
+                [, salida] = proceso.communicate_utf8_finish(resultado);
             } catch (error) {
                 return; // el toggle puede haberse destruido mientras esperaba
             }
