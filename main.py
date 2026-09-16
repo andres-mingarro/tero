@@ -36,6 +36,7 @@ _asegurar_libs_cuda()
 import threading
 import time
 import tomllib
+import webbrowser
 from pathlib import Path
 
 import numpy as np
@@ -149,7 +150,7 @@ class Tero:
         self._carga_soul_connector("Cargando voz", 1 / 3)
         print("Cargando voz...")
         self._tts = TTS(**config["tts"])
-        self._cerebro = Cerebro(**config["cerebro"])
+        self._cerebro = Cerebro(**config["cerebro"], on_delegar_codex=self._codex_activado)
         # Antes de decir "escuchando": recién reiniciada la máquina, cargar
         # el modelo lleva más que el timeout de una consulta (ver
         # cerebro/router.py), y el primer pedido fallaba con "se colgó el
@@ -209,6 +210,38 @@ class Tero:
         self._estado_voz = nombre
         if self._soul_connector is not None:
             self._soul_connector.estado(nombre)
+
+    def _codex_activado(self) -> None:
+        # Flash visual (cian + partículas, ver soul-connector-gnome/
+        # extension.js) justo cuando delegar_a_codex se ejecuta. No hace
+        # falta revertirlo a mano: _procesar() pasa a "hablando" apenas
+        # termina esta llamada (delegar_a_codex es casi instantánea, solo
+        # abre VS Code/una terminal), así que el flash dura lo que tarda
+        # la segunda ronda del modelo en armar la respuesta hablada.
+        self._estado_soul_connector("codex")
+
+    def _abrir_chatgpt(self) -> None:
+        # Atajo Ctrl+Shift (plataforma/linux.py): hand-off directo a
+        # ChatGPT, nunca pasa por el cerebro -- ni tool calling, ni las
+        # reglas de cuándo usar delegar_a_codex, ni cuota de Codex. Es
+        # abrir una pestaña, lo mismo que hace el usuario a mano; de ahí
+        # en más habla con ChatGPT directo, con el modo de voz propio de
+        # esa web (ver CLAUDE.md, "delegar_a_codex" y la investigación de
+        # imágenes en la memoria del agente).
+        webbrowser.open("https://chatgpt.com")
+        threading.Thread(target=self._flash_codex_temporal, daemon=True).start()
+
+    def _flash_codex_temporal(self) -> None:
+        # A diferencia de _codex_activado (que revierte solo porque sigue
+        # un turno de voz normal), acá no hay ningún turno -- el atajo no
+        # pasa por _procesar(). Se revierte a mano después de un rato, y
+        # solo si nada más cambió el estado mientras tanto (ej. el
+        # usuario arrancó a hablarle a Tero en el medio del flash).
+        anterior = self._estado_voz
+        self._estado_soul_connector("codex")
+        time.sleep(1.5)
+        if self._estado_voz == "codex":
+            self._estado_soul_connector(anterior if anterior != "codex" else "idle")
 
     def _decir(self, texto: str) -> None:
         """Habla un aviso fuera del flujo normal de turno (ej. Groq <-> Whisper
@@ -339,7 +372,7 @@ class Tero:
         self._plataforma.notificar(texto)
 
     def correr(self) -> None:
-        self._plataforma.escuchar_tecla(self.on_down, self.on_up)
+        self._plataforma.escuchar_tecla(self.on_down, self.on_up, self._abrir_chatgpt)
         self._monitor_salud.arrancar()
         print(f"Tero escuchando. Mantené {self._config['tecla']['nombre']} para hablar.")
         try:

@@ -12,6 +12,18 @@ from plataforma.base import Plataforma
 
 _EJES_PUNTERO = {ecodes.REL_X, ecodes.REL_Y}
 
+# Solo el Ctrl DERECHO -- decisión explícita del usuario (2026-09-16): el
+# izquierdo se usa todo el tiempo en shortcuts comunes de otras apps
+# (Ctrl+Shift+T, Ctrl+Shift+N, Ctrl+Shift+Esc...), y sumarlo dispararía
+# el atajo por accidente en medio del uso normal de la compu. El derecho
+# no lo usa nada más -- mismo motivo por el que ya es la tecla de
+# push-to-talk (config.toml, [tecla]). Efecto secundario aceptado: un
+# toque de Ctrl+Shift con la mano derecha también hace sonar los dos
+# beeps de push-to-talk (mismo evdev, no exclusivo) -- inofensivo, la
+# grabación de menos de 0.2s que resulta se descarta sola (main.py).
+_TECLAS_CTRL = {ecodes.KEY_RIGHTCTRL}
+_TECLAS_SHIFT = {ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT}
+
 
 def _es_teclado(dispositivo: InputDevice) -> bool:
     """Filtra ratones/mandos: un teclado real tiene teclas alfabéticas y
@@ -47,17 +59,27 @@ class PlataformaLinux(Plataforma):
         self._detener = threading.Event()
         self._hilo: threading.Thread | None = None
 
-    def escuchar_tecla(self, on_down: Callable[[], None], on_up: Callable[[], None]) -> None:
+    def escuchar_tecla(
+        self,
+        on_down: Callable[[], None],
+        on_up: Callable[[], None],
+        on_atajo_chatgpt: Callable[[], None] | None = None,
+    ) -> None:
         self._detener.clear()
         self._hilo = threading.Thread(
-            target=self._bucle_tecla, args=(on_down, on_up), daemon=True
+            target=self._bucle_tecla, args=(on_down, on_up, on_atajo_chatgpt), daemon=True
         )
         self._hilo.start()
 
     def detener(self) -> None:
         self._detener.set()
 
-    def _bucle_tecla(self, on_down: Callable[[], None], on_up: Callable[[], None]) -> None:
+    def _bucle_tecla(
+        self,
+        on_down: Callable[[], None],
+        on_up: Callable[[], None],
+        on_atajo_chatgpt: Callable[[], None] | None,
+    ) -> None:
         dispositivos = _teclados()
         if not dispositivos:
             raise RuntimeError(
@@ -68,17 +90,40 @@ class PlataformaLinux(Plataforma):
         selector = selectors.DefaultSelector()
         for dispositivo in dispositivos:
             selector.register(dispositivo, selectors.EVENT_READ)
+        # Estado de teclas mantenidas, para detectar el atajo Ctrl+Shift
+        # como acorde (las dos juntas, no una tecla física puntual --
+        # ni Ctrl ni Shift solas alcanzan). "disparado" evita repetir el
+        # callback mientras se sigan manteniendo apretadas; se limpia en
+        # cuanto se suelta cualquiera de las dos.
+        presionadas: set[int] = set()
+        disparado = False
         try:
             while not self._detener.is_set():
                 for clave, _ in selector.select(timeout=0.2):
                     dispositivo = clave.fileobj
                     for evento in dispositivo.read():
-                        if evento.type != ecodes.EV_KEY or evento.code != self._codigo_tecla:
+                        if evento.type != ecodes.EV_KEY:
                             continue
                         if evento.value == 1:  # tecla apretada
-                            on_down()
+                            presionadas.add(evento.code)
                         elif evento.value == 0:  # tecla soltada
-                            on_up()
+                            presionadas.discard(evento.code)
+
+                        if evento.code == self._codigo_tecla:
+                            if evento.value == 1:
+                                on_down()
+                            elif evento.value == 0:
+                                on_up()
+
+                        if on_atajo_chatgpt is not None:
+                            acorde = bool(presionadas & _TECLAS_CTRL) and bool(
+                                presionadas & _TECLAS_SHIFT
+                            )
+                            if acorde and not disparado:
+                                disparado = True
+                                on_atajo_chatgpt()
+                            elif not acorde:
+                                disparado = False
         finally:
             for dispositivo in dispositivos:
                 selector.unregister(dispositivo)

@@ -25,6 +25,7 @@ puro. Instalar un paquete de sistema solo cuando de verdad no hay otra.
 | `playerctl` | `sudo apt install playerctl` | `control_media`: play/pausa/siguiente vía MPRIS (D-Bus) | `sudo apt remove playerctl` |
 | `wmctrl` | `sudo apt install wmctrl` | Posicionar y fijar "siempre encima" la ventana dedicada de YouTube (`herramientas/_pantalla_youtube.py`) | `sudo apt remove wmctrl` |
 | Servicio systemd de usuario `tero.service` | `ln -s ~/proyectos/tero/systemd/tero.service ~/.config/systemd/user/tero.service && systemctl --user daemon-reload` | Arrancar/parar/reiniciar Tero por `systemctl --user` en vez de `pkill`/`nohup` a mano — es lo que usa el toggle "Tero" del menú rápido de GNOME (`soul-connector-gnome/panel.js`, 2026-09-14). No autoarranca en el login salvo que se corra además `systemctl --user enable tero` | `systemctl --user disable --now tero; rm ~/.config/systemd/user/tero.service` |
+| Bloque en `~/.bashrc` (entre `# --- Tero:` y `# --- fin Tero ---`) | Agregado a mano, ver CLAUDE.md sección `delegar_a_codex` | `PROMPT_COMMAND` escribe el directorio actual a `~/.cache/tero/cwd_actual` en cada prompt — es la única forma encontrada de que `delegar_a_codex` sepa en qué proyecto está el usuario (ni Ptyxis ni Warp exponen su cwd activo por D-Bus/AT-SPI, investigado en vivo el 2026-09-16) | Borrar el bloque entre esos comentarios de `~/.bashrc`, y `rm -rf ~/.cache/tero` |
 
 ## Cuentas / apps externas registradas
 

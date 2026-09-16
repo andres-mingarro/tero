@@ -20,6 +20,7 @@ from ollama import Client
 import herramientas.captura_pantalla  # noqa: F401
 import herramientas.celular  # noqa: F401
 import herramientas.clima  # noqa: F401  (registra la herramienta)
+import herramientas.codex  # noqa: F401
 import herramientas.mapas  # noqa: F401
 import herramientas.mover_ventana_monitor  # noqa: F401
 import herramientas.musica  # noqa: F401
@@ -85,10 +86,17 @@ def _sin_pregunta_de_seguimiento(texto: str) -> str:
 
 
 class Cerebro:
-    def __init__(self, modelo: str = "qwen3:4b-instruct"):
+    def __init__(self, modelo: str = "qwen3:4b-instruct", on_delegar_codex=None):
         self._modelo = modelo
         self._cliente = Client(timeout=_TIMEOUT_S)
         self._cliente_carga = Client(timeout=_TIMEOUT_CARGA_S)
+        # Dispara el estado visual "codex" del soul-connector (cian +
+        # partículas, ver soul-connector-gnome/extension.js) justo cuando
+        # se llama delegar_a_codex -- no antes de saber que la llamada fue
+        # limpia. dura poco (la herramienta en sí es casi instantánea,
+        # solo abre VS Code/una terminal) pero alcanza como confirmación
+        # visual antes de que main.py pase a "hablando".
+        self._on_delegar_codex = on_delegar_codex
         # Una lista por turno, no una lista plana de mensajes: un turno con
         # herramientas ocupa varios mensajes (assistant con tool_calls +
         # un tool por resultado) y recortar por cantidad de mensajes podría
@@ -235,6 +243,12 @@ class Cerebro:
                 vistas.add(clave)
                 resultado = ejecutar(llamada.function.name, llamada.function.arguments)
                 print(f"  tool_call: {llamada.function.name}({llamada.function.arguments}) -> {resultado!r}")
+                if (
+                    llamada.function.name == "delegar_a_codex"
+                    and self._on_delegar_codex is not None
+                    and not es_error(resultado)
+                ):
+                    self._on_delegar_codex()
                 ejecutadas.append((llamada.function.name, dict(llamada.function.arguments), resultado))
             if not ejecutadas:
                 break  # solo repeticiones de lo ya hecho, no hay nada nuevo

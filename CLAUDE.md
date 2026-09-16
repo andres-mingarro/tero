@@ -63,8 +63,9 @@ El usuario paga ChatGPT Plus (20 USD/mes). **La suscripción no incluye
 acceso a la API.** No hay presupuesto para API key de OpenAI.
 
 La única vía oficial de usar la suscripción desde código es **Codex CLI
-con login de ChatGPT** (`codex login`, después `codex exec` en modo no
-interactivo). Está documentado por OpenAI.
+con login de ChatGPT** (`codex login`, después `codex "prompt"` en modo
+interactivo — Tero usa este modo, no `codex exec`, ver `delegar_a_codex`).
+Está documentado por OpenAI.
 
 Descartado explícitamente:
 
@@ -157,7 +158,7 @@ tero/
                      terminal.py, tiempo.py, volumen.py, youtube.py,
                      mover_ventana_monitor.py, captura_pantalla.py,
                      _spotify_auth.py, _telegram.py, _ducking.py,
-                     _pantalla_youtube.py, _gnome_dbus.py, codex.py (fase 4)
+                     _pantalla_youtube.py, _gnome_dbus.py, codex.py
   soul_connector/    server.py, audio_sistema.py -- infraestructura
                      compartida (WebSocket + audio de sistema), no overlay;
                      el overlay en sí (pywebview) se deprecó, ver "El
@@ -215,8 +216,7 @@ herramientas = [
 ]
 ```
 
-Catálogo completo ✅ salvo `delegar_a_codex` (fase 4).
-`consultar_hora` no estaba en el plan original: se agregó porque el modelo
+Catálogo completo ✅. `consultar_hora` no estaba en el plan original: se agregó porque el modelo
 local no tiene noción de reloj y "qué hora es"/"qué día es hoy" lo
 necesitan. `calcular_viaje` y `mandar_al_celular` tampoco estaban en el
 plan original, surgieron de pedidos concretos del usuario (distancia a un
@@ -346,22 +346,132 @@ Notas por herramienta:
   `codex exec` (sube la imagen por la sesión de ChatGPT Plus ya logueada,
   sin API key, sin exponerla por URL — ver Restricción de presupuesto).
 
-### `delegar_a_codex`
+### `delegar_a_codex` ✅ (fase 4, 2026-09-16)
 
 ```python
-def delegar_a_codex(tarea: str, directorio: str) -> str:
-    """Tareas sobre código o archivos del proyecto."""
+def delegar_a_codex(tarea: str) -> str:
+    """Tareas sobre código o archivos de un proyecto real."""
 ```
 
-Invoca `codex exec` en modo no interactivo, con `cwd` en el proyecto,
-timeout generoso, salida capturada. Tres cuidados:
+**No es un `codex exec` autónomo en background que le lee el resultado al
+usuario por voz** — ese era el diseño original de este documento, y se
+abandonó antes de escribir código porque no había forma decente de
+resolver la confirmación (Codex modifica archivos, y no hay pantalla en
+el flujo de voz para mostrar un diff antes de aprobar). El diseño real es
+un **hand-off**, pedido explícito del usuario: Tero abre la puerta, el
+usuario sigue del otro lado, mirando.
 
-1. **Nunca destructivo sin confirmación.** Codex modifica archivos. Que
-   corra sobre un repo con git limpio, o pedir confirmación hablada.
-2. **Avisar que tarda.** El TTS dice "lo estoy viendo" al delegar, para que
-   el silencio de 15 s no parezca que se colgó.
-3. **Detrás de una interfaz.** Si OpenAI cambia algo, se reemplaza un solo
-   archivo.
+`delegar_a_codex` (`herramientas/codex.py`) hace dos cosas y devuelve el
+control al toque, sin esperar nada:
+
+1. `code <directorio>` — abre VS Code en el proyecto (con la extensión de
+   Codex ya instalada ahí, si se la quiere usar además).
+2. Abre una terminal **Ptyxis** en `directorio`, corriendo
+   `codex "<tarea>"` — la CLI oficial, en modo interactivo, con el pedido
+   ya cargado como primer mensaje. Investigado en vivo antes de
+   implementar: el panel lateral de la extensión de VS Code (`openai.chatgpt`)
+   no se puede precargar con un prompt desde afuera, solo sirve para
+   tipear a mano; la CLI (`codex "prompt"`, distinto de `codex exec`) sí
+   acepta un prompt inicial como argumento y arranca la TUI interactiva
+   con eso ya cargado.
+
+De ahí en más, el usuario sigue solo — mira y aprueba cada cambio con sus
+propios ojos dentro de la sesión de Codex (que tiene su propio control de
+aprobación, `--ask-for-approval`). **Esto resuelve la confirmación sin
+necesidad de diseñar una:** nunca hay edición autónoma sin que el usuario
+la esté mirando, así que no hace falta chequear que el repo esté git
+limpio ni pedir confirmación hablada — los "tres cuidados" originales de
+este documento quedan obsoletos, ya no aplican.
+
+**`directorio` no lo dice el usuario en voz ni lo arma el modelo** —
+pedirle a un modelo de 4B que arme una ruta de archivo a partir de una
+transcripción es frágil, mismo motivo de fondo por el que otras
+herramientas de este proyecto resuelven cosas en código en vez de pedirle
+un paso de razonamiento extra al modelo (ver Reglas de arquitectura). Se
+infiere del contexto: la terminal activa. Investigado en vivo antes de
+implementar (con el objetivo original de leer el cwd por AT-SPI/D-Bus,
+sin tocar nada del sistema):
+
+- **Ptyxis** corre como un único proceso (`--gapplication-service`) para
+  todas las ventanas; el PID que da AT-SPI de la app activa apunta a ese
+  proceso compartido, no a la pestaña puntual, y cada pestaña abierta
+  tiene su propio `bash` hijo sin forma de saber desde afuera cuál
+  corresponde a la que tiene foco. El título de la ventana tampoco trae
+  un path (Ptyxis le pone el nombre del proceso en primer plano). Por
+  D-Bus (`org.gnome.Ptyxis`) solo expone la superficie genérica de
+  GApplication, nada de pestañas ni cwd.
+- **Warp** tampoco: su `/status` es un panel para humanos dentro de la
+  propia app, sin CLI/API externa para consultarlo.
+- Conclusión: ninguno de los dos expone esto desde afuera. **Solución: un
+  hook de shell**, terminal-agnóstico (funciona igual en cualquiera) —
+  `~/.bashrc` escribe el directorio actual a
+  `~/.cache/tero/cwd_actual` en cada prompt (`PROMPT_COMMAND`), mismo
+  patrón que usan iTerm2/VS Code/direnv para lo mismo. Ver
+  INSTALACIONES.md para el detalle y cómo revertirlo.
+
+**Trampa encontrada en vivo:** `ptyxis -- codex "tarea"` fallaba con
+`Failed to find executable codex: No such file or directory` — Ptyxis
+ejecuta el comando directo, sin pasar por `.bashrc`, y en esta máquina
+`codex` lo agrega al PATH `nvm` (que se carga desde `.bashrc`). Fix:
+correrlo como `bash -ic 'codex "tarea"'` — el `-i` fuerza que bash cargue
+`.bashrc` igual que lo haría una pestaña común de Ptyxis abierta a mano.
+
+**Criterio de ruteo** (`cerebro/prompt.py`): sin clasificador aparte, sale
+del tool calling normal — el modelo local usa `delegar_a_codex` para
+pedidos sobre archivos/código de un proyecto real (un error de la
+consola, un bug, "explicame este archivo"), nunca para preguntas
+generales de programación que no dependan de un proyecto puntual
+("¿qué es un closure?") — esas las contesta él mismo, directo.
+
+**Estado visual "codex"** (cian + partículas, ver soul-connector-gnome/
+extension.js) ya estaba implementado desde el 2026-09-14 pero sin nada
+que lo disparara -- `Cerebro` acepta un callback opcional
+`on_delegar_codex`, invocado justo cuando `delegar_a_codex` se ejecuta sin
+error (`cerebro/router.py`, dentro del loop de tool calls). `main.py` lo
+conecta a `_codex_activado()`, que pone el estado en "codex". No hace
+falta revertirlo a mano: como la herramienta es casi instantánea, el
+flash dura solo hasta que `_procesar()` pasa a "hablando" para decir
+"listo".
+
+### Atajo Ctrl+Shift: hand-off directo a ChatGPT (2026-09-16)
+
+Retomando la investigación pospuesta sobre generar imágenes por voz (ver
+memoria del agente, "investigación ChatGPT imágenes"): el usuario pidió
+un atajo global que abra ChatGPT directo, sin pasar por Tero para nada.
+**No es una herramienta del catálogo** -- no pasa por `cerebro/router.py`,
+ni por tool calling, ni por ninguna regla de cuándo usar Codex: es un
+hand-off puro a nivel plataforma, exactamente como `delegar_a_codex` pero
+sin ni siquiera la mediación de una transcripción. El usuario le habla a
+ChatGPT con el modo de voz propio de esa web.
+
+- `Plataforma.escuchar_tecla` (`plataforma/base.py`/`linux.py`) ahora
+  acepta un tercer callback opcional, `on_atajo_chatgpt`, disparado una
+  sola vez por combinación cuando se detectan Ctrl+Shift juntas (acorde,
+  no una tecla puntual) -- reusa el mismo loop/selector que ya lee todos
+  los teclados para el push-to-talk, sin abrir un segundo listener.
+- **Solo Ctrl DERECHO**, nunca el izquierdo -- decisión explícita del
+  usuario tras pensarlo en vivo: el izquierdo se usa todo el tiempo en
+  shortcuts de otras apps (Ctrl+Shift+T, +N, +Esc...) y sumarlo dispararía
+  el atajo por accidente en medio del uso normal de la compu. El derecho
+  no lo usa nada más -- mismo motivo por el que ya es la tecla de
+  push-to-talk. Efecto secundario aceptado y verificado en vivo: un toque
+  de Ctrl+Shift con la mano derecha también hace sonar los dos beeps de
+  push-to-talk (mismo evdev, no exclusivo, dos listeners lo ven igual) --
+  inofensivo, la grabación de menos de 0,2s que resulta se descarta sola.
+- `main.py._abrir_chatgpt()`: `webbrowser.open("https://chatgpt.com")` +
+  un flash del estado "codex" de ~1,5s (`_flash_codex_temporal`, hilo
+  aparte -- a diferencia de `_codex_activado`, acá no hay ningún turno de
+  voz en curso que lo revierta solo, así que se revierte a mano, y solo
+  si nada más cambió el estado mientras tanto).
+- **Depurado en vivo con el usuario probando en tiempo real**: la
+  detección funcionaba desde el primer intento, pero las primeras pruebas
+  fallaron porque el usuario apretaba Ctrl **derecho** (su costumbre, es
+  push-to-talk) mientras el código en ese momento solo escuchaba el
+  izquierdo. Un script de diagnóstico (loguear cada evento de tecla crudo,
+  sin lógica de acorde) confirmó que el teclado mandaba los eventos bien
+  y que el problema era de qué tecla física se estaba probando, no del
+  código -- ahí se destapó la razón real por la que el usuario quiere el
+  derecho (el menos usado), no el izquierdo.
 
 ---
 
@@ -655,17 +765,22 @@ reglas de arriba) y los tests de regresión.
    AT-SPI (ver Herramientas), sin ventana activa expuesta como dato
    aparte — se usa internamente solo para saber qué está enfocado, no se
    muestra a ningún lado. `capturar_pantalla` (2026-09-16): guarda la
-   captura, todavía no la interpreta nadie — eso es trabajo de la fase 4.
-4. **Codex** — la rama pesada. No arrancado.
+   captura; interpretarla queda para cuando el usuario mencione fase 4 de
+   nuevo con soporte de imágenes (ver [[investigacion-chatgpt-imagenes]]
+   en la memoria del agente — pospuesto a pedido explícito).
+4. **Codex** ✅ (2026-09-16) — no terminó siendo "la rama pesada" del plan
+   original: es un hand-off (VS Code + terminal con Codex), no un agente
+   autónomo corriendo en background. Ver `delegar_a_codex` más arriba
+   para el diseño completo.
 5. **Soul-connector** ✅ — overlay con WebSocket, ver sección dedicada más arriba.
 6. **Linux** ✅ — `plataforma/linux.py` ya existe y funciona (desarrollo
    pasó a Linux desde el arranque del proyecto; no hay
    `plataforma/windows.py`).
 
-Estado actual: **fases 1, 2, 3, 5 y 6 completas.** Pendiente para
-retomar:
-- `delegar_a_codex` (fase 4) sigue sin arrancar — es lo único que falta
-  del catálogo completo de herramientas.
+Estado actual: **catálogo completo, las 6 fases originales cerradas.**
+Pendiente para retomar (ver auditoría de arquitectura más arriba): tests
+de regresión para comportamientos ya medidos a mano, y la generación de
+imágenes por voz (pospuesta, ver nota de la fase 4).
 
 ---
 
